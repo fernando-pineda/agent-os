@@ -339,11 +339,6 @@ function GroupSection({
                     {agent.name}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
-                    {agent.group && (
-                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
-                        {agent.group}
-                      </span>
-                    )}
                     {agent.workspace !== agent.id && (
                       <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-400">
                         {agent.workspace}
