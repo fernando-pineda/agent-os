@@ -1,5 +1,6 @@
 'use client';
 
+import { Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   useAgentSelection,
@@ -7,17 +8,25 @@ import {
   useAgentUsage,
   useLivePreview,
 } from '@/components/agent-context';
+import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { createAgent, getModels, startAgent, stopAgent } from '@/lib/api';
+import {
+  createAgent,
+  deleteAgent,
+  getModels,
+  startAgent,
+  stopAgent,
+} from '@/lib/api';
 import type { AgentInfo, AgentStatus, ModelItem } from '@/lib/types';
 
 function statusColor(status: AgentStatus): string {
@@ -129,6 +138,39 @@ export function AgentsPanel() {
       console.error(err);
     }
   }, []);
+
+  const [deleteDialog, setDeleteDialog] = useState<AgentInfo | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const openDeleteDialog = useCallback((agent: AgentInfo) => {
+    setDeleteDialog(agent);
+    setDeleteConfirm('');
+    setDeleteError('');
+  }, []);
+
+  const closeDeleteDialog = useCallback(() => {
+    setDeleteDialog(null);
+    setDeleteConfirm('');
+    setDeleteError('');
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteDialog) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteAgent(deleteDialog.id, deleteConfirm);
+      closeDeleteDialog();
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : 'Failed to delete agent',
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteDialog, deleteConfirm, closeDeleteDialog]);
 
   return (
     <div className="flex h-full flex-col border-t border-zinc-800 bg-zinc-900">
@@ -244,19 +286,33 @@ export function AgentsPanel() {
                       </span>
                     )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void toggleStartStop(agent);
-                    }}
-                    className="h-6 px-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
-                  >
-                    {agent.status === 'online' || agent.status === 'busy'
-                      ? 'Stop'
-                      : 'Start'}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <TooltipIconButton
+                      tooltip="Delete agent"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDeleteDialog(agent);
+                      }}
+                      className="text-zinc-400 hover:bg-zinc-700 hover:text-destructive"
+                    >
+                      <Trash2Icon className="size-3.5" />
+                    </TooltipIconButton>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void toggleStartStop(agent);
+                      }}
+                      className="h-6 px-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+                    >
+                      {agent.status === 'online' || agent.status === 'busy'
+                        ? 'Stop'
+                        : 'Start'}
+                    </Button>
+                  </div>
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
                   {agent.group && (
@@ -288,6 +344,37 @@ export function AgentsPanel() {
           })}
         </ul>
       </div>
+
+      <Dialog open={deleteDialog !== null} onOpenChange={closeDeleteDialog}>
+        <DialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100">
+          <DialogHeader>
+            <DialogTitle>Delete {deleteDialog?.name}</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              This will permanently delete the agent and its configuration. Type
+              the agent's exact name below to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={deleteConfirm}
+              onChange={(e) => setDeleteConfirm(e.target.value)}
+              placeholder={deleteDialog?.name}
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+            {deleteError && (
+              <div className="text-xs text-destructive">{deleteError}</div>
+            )}
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleteConfirm !== deleteDialog?.name || deleting}
+              className="w-full"
+            >
+              {deleting ? 'Deleting...' : 'Delete agent'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

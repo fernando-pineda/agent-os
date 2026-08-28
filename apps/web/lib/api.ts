@@ -67,6 +67,23 @@ export async function stopAgent(id: string): Promise<void> {
   });
 }
 
+export async function deleteAgent(
+  id: string,
+  confirmName: string,
+): Promise<void> {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: confirmName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(
+      body.error ? `Delete failed: ${body.error}` : `HTTP ${res.status}`,
+    );
+  }
+}
+
 export async function getUsage(
   agentId: string,
 ): Promise<{ inputTokens: number; outputTokens: number }> {

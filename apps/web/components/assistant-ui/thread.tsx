@@ -13,7 +13,7 @@ import {
   type ImageMessagePartComponent,
   MessagePrimitive,
   SuggestionPrimitive,
-  TextMessagePartComponent,
+  type TextMessagePartComponent,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
   unstable_useMentionAdapter,
@@ -38,7 +38,9 @@ import {
   createContext,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
   useContext,
+  useMemo,
 } from 'react';
 import {
   useAgentSelection,
@@ -282,28 +284,69 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+  const agents = useAgentsFeed();
+  const mention = unstable_useMentionAdapter({
+    items: agents.map((a) => ({
+      id: a.id,
+      type: 'agent',
+      label: a.name,
+      description: a.role ?? a.status,
+    })),
+  });
+
   return (
-    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
-      <ComposerPrimitive.AttachmentDropzone
-        render={
-          <div
-            data-slot="aui_composer-shell"
-            className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
+    <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+        <ComposerPrimitive.AttachmentDropzone
+          render={
+            <div
+              data-slot="aui_composer-shell"
+              className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
+            />
+          }
+        >
+          <ComposerAttachments />
+          <ComposerPrimitive.Input
+            placeholder="Send a message..."
+            className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
+            rows={1}
+            autoFocus={autoFocus}
+            enterKeyHint="send"
+            aria-label="Message input"
           />
-        }
+          <ComposerAction />
+        </ComposerPrimitive.AttachmentDropzone>
+      </ComposerPrimitive.Root>
+
+      <ComposerPrimitive.Unstable_TriggerPopover
+        char="@"
+        adapter={mention.adapter}
       >
-        <ComposerAttachments />
-        <ComposerPrimitive.Input
-          placeholder="Send a message..."
-          className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
-          rows={1}
-          autoFocus={autoFocus}
-          enterKeyHint="send"
-          aria-label="Message input"
+        <ComposerPrimitive.Unstable_TriggerPopover.Directive
+          {...mention.directive}
         />
-        <ComposerAction />
-      </ComposerPrimitive.AttachmentDropzone>
-    </ComposerPrimitive.Root>
+        <ComposerPrimitive.Unstable_TriggerPopoverItems>
+          {(items) => (
+            <div className="rounded-lg border border-border/60 bg-background shadow-md p-1">
+              {items.map((item) => (
+                <ComposerPrimitive.Unstable_TriggerPopoverItem
+                  key={item.id}
+                  item={item}
+                  className="flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-sm data-[highlighted]:bg-accent"
+                >
+                  <span>{item.label}</span>
+                  {item.description && (
+                    <span className="text-muted-foreground text-xs">
+                      {item.description}
+                    </span>
+                  )}
+                </ComposerPrimitive.Unstable_TriggerPopoverItem>
+              ))}
+            </div>
+          )}
+        </ComposerPrimitive.Unstable_TriggerPopoverItems>
+      </ComposerPrimitive.Unstable_TriggerPopover>
+    </ComposerPrimitive.Unstable_TriggerPopoverRoot>
   );
 };
 
@@ -577,6 +620,33 @@ const AssistantActionBar: FC = () => {
   );
 };
 
+function renderWithMentions(text: string): ReactNode {
+  const regex = /:agent\[([^\]]+)\](?:\{name=([^}]+)\})?/g;
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    nodes.push(
+      <span
+        key={`${match.index}-${match[1]}`}
+        className="inline-flex items-center rounded-full border border-border/60 bg-muted px-1.5 py-0.5 text-xs"
+      >
+        {match[1]}
+      </span>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+const UserTextPart: TextMessagePartComponent = ({ text }) => (
+  <span className="whitespace-pre-wrap">{renderWithMentions(text)}</span>
+);
+
 const UserFilePart: FileMessagePartComponent = (part) => (
   <div data-slot="aui_user-message-file" className="py-1">
     <File {...part} />
@@ -601,7 +671,11 @@ const UserMessage: FC = () => {
       <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
         <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
           <MessagePrimitive.Parts
-            components={{ File: UserFilePart, Image: UserImagePart }}
+            components={{
+              Text: UserTextPart,
+              File: UserFilePart,
+              Image: UserImagePart,
+            }}
           />
         </div>
         <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">

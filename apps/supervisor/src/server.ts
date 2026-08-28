@@ -135,7 +135,7 @@ async function handle(
   }
 
   const matchAgentId = /^\/api\/agents\/([^/]+)$/.exec(pathname);
-  if (matchAgentId && req.method === 'PATCH') {
+  if (matchAgentId && matchAgentId[1] !== 'events' && req.method === 'PATCH') {
     const id = decodeURIComponent(matchAgentId[1]!);
     const body = (await readJson(req)) as Record<string, unknown>;
     const patch: Parameters<typeof updateAgentConfig>[1] = {};
@@ -166,7 +166,7 @@ async function handle(
     }
   }
 
-  if (matchAgentId && req.method === 'DELETE') {
+  if (matchAgentId && matchAgentId[1] !== 'events' && req.method === 'DELETE') {
     const id = decodeURIComponent(matchAgentId[1]!);
     const config = await readAgentConfig(id);
     if (!config) {
