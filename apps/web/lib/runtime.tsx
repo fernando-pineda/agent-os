@@ -52,10 +52,16 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
   if (content.length === 0) {
     content.push({ type: 'text', text: '' });
   }
+
   return {
     id: m.id,
     role: m.role === 'tool' ? 'assistant' : m.role,
     content,
+    // Tool calls run server-side with no approval gate; mark assistant
+    // messages complete so assistant-ui never shows Allow/Deny.
+    ...(m.role === 'assistant' && {
+      status: { type: 'complete', reason: 'stop' } as const,
+    }),
     createdAt: new Date(),
   };
 }
@@ -107,14 +113,22 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     getMessages(agentId)
       .then((ui) => {
         if (cancelled) return;
+        const seenIds = new Set<string>();
         setMessages(
-          ui.map((m, i) => ({
-            id: m.id ?? `m-${i}`,
-            role: m.role,
-            text:
-              extractText(m.parts) || (m as { content?: string }).content || '',
-            toolParts: extractToolParts(m.parts),
-          })),
+          ui.map((m, i) => {
+            let id = m.id ?? `m-${i}`;
+            while (seenIds.has(id)) id = `${id}-${i}`;
+            seenIds.add(id);
+            return {
+              id,
+              role: m.role,
+              text:
+                extractText(m.parts) ||
+                (m as { content?: string }).content ||
+                '',
+              toolParts: extractToolParts(m.parts),
+            };
+          }),
         );
         setLoaded(true);
       })

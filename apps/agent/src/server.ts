@@ -65,6 +65,8 @@ type NewAssistantPart =
       toolCallId: string;
       toolName: string;
       args: Record<string, unknown>;
+      result?: string;
+      isError?: boolean;
     };
 
 interface RunControls {
@@ -378,6 +380,13 @@ function handleStreamEvent(
         }),
       );
     }
+    const part = newAssistantParts.find(
+      (p) => p.type === 'tool-call' && p.toolCallId === event.toolCallId,
+    );
+    if (part && part.type === 'tool-call') {
+      part.result = result.output;
+      part.isError = result.ok === false;
+    }
   }
 }
 
@@ -408,6 +417,8 @@ async function persistTurn(
         toolCallId: part.toolCallId,
         toolName: part.toolName,
         args: part.args,
+        ...(part.result !== undefined && { result: part.result }),
+        ...(part.isError !== undefined && { isError: part.isError }),
       });
     }
   }
