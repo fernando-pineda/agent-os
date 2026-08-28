@@ -40,6 +40,33 @@ export function threadPath(homeDir: string): string {
   return join(homeDir, 'thread.json');
 }
 
+export interface AgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export function usagePath(homeDir: string): string {
+  return join(homeDir, 'usage.json');
+}
+
+export async function loadUsage(homeDir: string): Promise<AgentUsage> {
+  try {
+    const raw = await readFile(usagePath(homeDir), 'utf-8');
+    return JSON.parse(raw) as AgentUsage;
+  } catch {
+    return { inputTokens: 0, outputTokens: 0 };
+  }
+}
+
+export async function saveUsage(
+  homeDir: string,
+  usage: AgentUsage,
+): Promise<void> {
+  const tmp = `${usagePath(homeDir)}.tmp`;
+  await writeFile(tmp, JSON.stringify(usage), 'utf-8');
+  await rename(tmp, usagePath(homeDir));
+}
+
 export async function loadThread(homeDir: string): Promise<UIMessage[]> {
   try {
     const raw = await readFile(threadPath(homeDir), 'utf-8');

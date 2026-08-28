@@ -15,6 +15,7 @@ export interface StatusTracker {
   getAgents(): AgentInfo[];
   getAgent(id: string): AgentInfo | undefined;
   updateStatus(id: string, status: AgentStatus, currentTaskId?: string): void;
+  removeAgent(id: string): void;
   onChange(listener: () => void): () => void;
   close(): Promise<void>;
   init(): Promise<void>;
@@ -76,6 +77,11 @@ export class StatusTrackerImpl implements StatusTracker {
       }
       existing.lastEventAt = new Date().toISOString();
     }
+    this.notify();
+  }
+
+  removeAgent(id: string): void {
+    this.info.delete(id);
     this.notify();
   }
 

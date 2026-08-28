@@ -13,8 +13,10 @@ import {
   type ImageMessagePartComponent,
   MessagePrimitive,
   SuggestionPrimitive,
+  TextMessagePartComponent,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
+  unstable_useMentionAdapter,
   useAuiState,
 } from '@assistant-ui/react';
 import {
@@ -38,7 +40,12 @@ import {
   type PropsWithChildren,
   useContext,
 } from 'react';
-import { useAgentSelection, useAgentUsage } from '@/components/agent-context';
+import {
+  useAgentSelection,
+  useAgentsFeed,
+  useAgentUsage,
+  useModelsFeed,
+} from '@/components/agent-context';
 import {
   ComposerAddAttachment,
   ComposerAttachments,
@@ -302,15 +309,20 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
 
 const ComposerAction: FC = () => {
   const { selectedAgentId } = useAgentSelection();
+  const agents = useAgentsFeed();
   const { usage } = useAgentUsage();
+  const { models } = useModelsFeed();
+  const agent = agents.find((a) => a.id === selectedAgentId);
   const u = selectedAgentId ? usage[selectedAgentId] : undefined;
+  const contextWindow =
+    models.find((m) => m.id === agent?.model)?.contextLength ?? 262144;
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex items-center gap-2">
         <ComposerAddAttachment />
         {u && (
           <ContextDisplay.Text
-            modelContextWindow={262144}
+            modelContextWindow={contextWindow}
             usage={{
               inputTokens: u.inputTokens,
               outputTokens: u.outputTokens,

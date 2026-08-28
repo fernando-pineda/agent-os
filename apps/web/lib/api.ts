@@ -67,6 +67,14 @@ export async function stopAgent(id: string): Promise<void> {
   });
 }
 
+export async function getUsage(
+  agentId: string,
+): Promise<{ inputTokens: number; outputTokens: number }> {
+  const res = await fetch(`${BASE}/api/agents/${agentId}/usage`);
+  if (!res.ok) throw new Error(`usage failed: ${res.status}`);
+  return res.json();
+}
+
 export async function getMessages(agentId: string): Promise<UIMessage[]> {
   const res = await fetch(`${BASE}/api/agents/${agentId}/messages`);
   if (!res.ok) throw new Error(`messages failed: ${res.status}`);

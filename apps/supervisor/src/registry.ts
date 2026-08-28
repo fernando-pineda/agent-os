@@ -5,11 +5,13 @@ import {
   open,
   readdir,
   readFile,
+  rm,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import type { AgentConfig, AgentInfo, AgentStatus } from '@agent-os/core';
 import {
   ensureWorkspaceUser,
@@ -17,6 +19,7 @@ import {
   userExists,
   usernameForWorkspace,
 } from '@agent-os/sandbox';
+import { uninstallLaunchdAgent } from './launchd.js';
 
 export const AGENTS_ROOT = join(homedir(), '.agent-os', 'agents');
 const REGISTRY_PATH = join(homedir(), '.agent-os', 'registry.json');
@@ -129,6 +132,77 @@ export interface CreateAgentResult {
   command?: string | undefined;
 }
 
+export async function writeAgentConfig(config: AgentConfig): Promise<void> {
+  await writeFile(
+    join(AGENTS_ROOT, config.id, 'config.json'),
+    JSON.stringify(config, null, 2),
+    'utf-8',
+  );
+}
+
+export async function updateAgentConfig(
+  id: string,
+  patch: {
+    name?: string | undefined;
+    group?: string | undefined;
+    role?: string | undefined;
+    model?: string | undefined;
+    workspace?: string | undefined;
+    sandboxed?: boolean | undefined;
+  },
+): Promise<AgentConfig | null> {
+  const config = await readAgentConfig(id);
+  if (!config) return null;
+
+  if (patch.name !== undefined) config.name = patch.name;
+  if (patch.group !== undefined) config.group = patch.group;
+  if (patch.role !== undefined) config.role = patch.role;
+  if (patch.model !== undefined) config.model = patch.model;
+  if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
+  if (patch.workspace !== undefined) {
+    const validationError = validateWorkspace(patch.workspace);
+    if (validationError) {
+      throw new Error(validationError);
+    }
+    config.workspace = patch.workspace;
+  }
+
+  await writeAgentConfig(config);
+  return config;
+}
+
+export async function deleteAgent(
+  registry: Registry,
+  id: string,
+): Promise<void> {
+  await stopAgent(registry, id);
+
+  try {
+    await uninstallLaunchdAgent(id);
+  } catch (err) {
+    console.warn(
+      `uninstallLaunchdAgent(${id}) failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  try {
+    await promisify(execFile)('tmux', ['kill-session', '-t', `agent-os-${id}`]);
+  } catch {
+    // Session may already be gone.
+  }
+
+  const index = registry.agents.findIndex((a) => a.id === id);
+  if (index >= 0) {
+    registry.agents.splice(index, 1);
+  }
+  await saveRegistry(registry);
+
+  await rm(join(AGENTS_ROOT, id), { recursive: true, force: true });
+  // Never removes the workspace user home; only the supervisor-owned config dir.
+}
+
 export async function createAgent(
   registry: Registry,
   input: CreateAgentInput,
@@ -165,11 +239,7 @@ export async function createAgent(
     };
   }
 
-  await writeFile(
-    join(homeDir, 'config.json'),
-    JSON.stringify(config, null, 2),
-    'utf-8',
-  );
+  await writeAgentConfig(config);
 
   try {
     await ensureWorkspaceUser(workspace);

@@ -25,7 +25,9 @@ import { loadMemoryIndex } from './compact.js';
 import { myPort, readRegistry } from './registry.js';
 import {
   loadThread,
+  loadUsage,
   saveThread,
+  saveUsage,
   type UIMessage,
   uiMessagesToChat,
 } from './thread.js';
@@ -107,6 +109,13 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         const messages = await loadThread(deps.homeDir);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify(messages));
+        return;
+      }
+
+      if (method === 'GET' && url === '/usage') {
+        const usage = await loadUsage(deps.homeDir);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(usage));
         return;
       }
 
@@ -243,6 +252,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             agentId: serverDeps.agentId,
             ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
             ...(memoryIndex ? { memoryIndex } : {}),
+            buildContext: serverDeps.buildContext,
             signal: controller.signal,
             onEvent: (event: LoopEvent) => {
               if (event.type === 'done' && event.usage) {
@@ -261,6 +271,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             },
           });
           await persistTurn(messages, newAssistantParts, textParts, serverDeps);
+          if (lastUsage) {
+            await saveUsage(serverDeps.homeDir, lastUsage);
+          }
           // AI SDK data-stream needs explicit finish frames to complete.
           const finishUsage = lastUsage ?? { inputTokens: 0, outputTokens: 0 };
           streamController.enqueue({
@@ -321,6 +334,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         messages: chatMessages,
         agentId: serverDeps.agentId,
         ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
+        buildContext: serverDeps.buildContext,
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {
           if (event.type === 'text-delta') {

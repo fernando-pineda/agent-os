@@ -15,9 +15,12 @@ import {
 import type { CreateAgentInput, Registry } from './registry.js';
 import {
   createAgent,
+  deleteAgent,
   getAgentPort,
+  readAgentConfig,
   startAgent,
   stopAgent,
+  updateAgentConfig,
 } from './registry.js';
 import type { StatusTracker } from './status.js';
 
@@ -34,7 +37,10 @@ export function startServer(
     );
     const sendCors = (): void => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Methods',
+        'GET, POST, PATCH, DELETE, OPTIONS',
+      );
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     };
     sendCors();
@@ -125,6 +131,63 @@ async function handle(
     }
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result.agent));
+    return;
+  }
+
+  const matchAgentId = /^\/api\/agents\/([^/]+)$/.exec(pathname);
+  if (matchAgentId && req.method === 'PATCH') {
+    const id = decodeURIComponent(matchAgentId[1]!);
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const patch: Parameters<typeof updateAgentConfig>[1] = {};
+    if (typeof body.name === 'string') patch.name = body.name;
+    if (typeof body.group === 'string') patch.group = body.group;
+    if (typeof body.role === 'string') patch.role = body.role;
+    if (typeof body.model === 'string') patch.model = body.model;
+    if (typeof body.workspace === 'string') patch.workspace = body.workspace;
+    if (typeof body.sandboxed === 'boolean') patch.sandboxed = body.sandboxed;
+    try {
+      const updated = await updateAgentConfig(id, patch);
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Agent not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(updated));
+      return;
+    } catch (err) {
+      res.writeHead(422, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return;
+    }
+  }
+
+  if (matchAgentId && req.method === 'DELETE') {
+    const id = decodeURIComponent(matchAgentId[1]!);
+    const config = await readAgentConfig(id);
+    if (!config) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    const body = (await readJson(req)) as Record<string, unknown>;
+    if (body.confirm !== config.name) {
+      res.writeHead(422, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: `Deletion requires confirm: "${config.name}"`,
+        }),
+      );
+      return;
+    }
+    await deleteAgent(registry, id);
+    statusTracker.removeAgent(id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, id }));
     return;
   }
 
@@ -243,6 +306,30 @@ async function handle(
     } catch {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Agent is unreachable' }));
+      return;
+    }
+  }
+
+  const matchAgentUsage = /^\/api\/agents\/([^/]+)\/usage$/.exec(pathname);
+  if (matchAgentUsage && req.method === 'GET') {
+    const id = decodeURIComponent(matchAgentUsage[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const response = await fetch(`http://localhost:${agentPort}/usage`);
+      const body = await response.text();
+      res.writeHead(response.ok ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(body);
+      return;
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ inputTokens: 0, outputTokens: 0 }));
       return;
     }
   }

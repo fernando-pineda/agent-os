@@ -10,7 +10,7 @@ import type {
 } from '@agent-os/core';
 import { FireworksLLMClient, MockLLMClient } from '@agent-os/core';
 import { wrapWithSandbox } from '@agent-os/sandbox';
-import { defaultTools, messageAgent, TmuxSession } from '@agent-os/tools';
+import { defaultTools, TmuxSession } from '@agent-os/tools';
 import { scheduleCompaction } from './compact.js';
 import { loadAgentConfig } from './config.js';
 import { createAgentServer, sendAgentMessageHttp } from './server.js';
@@ -154,7 +154,7 @@ function buildTools(
   workspace: string,
   _agent: AgentConfig,
 ): Tool[] {
-  const base = [...defaultTools(), messageAgent];
+  const base = defaultTools();
   if (!sandboxed) {
     return base;
   }

@@ -14,6 +14,7 @@ interface OnboardingInput {
 interface ModelEntry {
   id: string;
   supportsTools: boolean;
+  contextLength?: number;
 }
 
 interface ModelCache {
@@ -89,6 +90,9 @@ export async function listModels(): Promise<{
     const entries: ModelEntry[] = models.map((m) => ({
       id: String(m.id ?? m.name ?? ''),
       supportsTools: Boolean(m.supportsTools ?? m.supports_tool_calls ?? false),
+      ...(typeof m.contextLength === 'number' && {
+        contextLength: m.contextLength,
+      }),
     }));
     modelCache = { fetchedAt: now, models: entries };
     return { models: entries };

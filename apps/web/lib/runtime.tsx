@@ -7,7 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { useAgentUsage, useLivePreview } from '@/components/agent-context';
-import { getMessages } from '@/lib/api';
+import { getMessages, getUsage } from '@/lib/api';
 
 export type RuntimeProviderProps = {
   children: ReactNode;
@@ -111,6 +111,11 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   useEffect(() => {
     let cancelled = false;
     setLoaded(false);
+    getUsage(agentId)
+      .then((u) => {
+        if (!cancelled) setUsage(agentId, u);
+      })
+      .catch(() => {});
     getMessages(agentId)
       .then((ui) => {
         if (cancelled) return;
@@ -142,7 +147,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [agentId]);
+  }, [agentId, setUsage]);
 
   const onNew = useCallback(
     async (message: {

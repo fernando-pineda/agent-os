@@ -8,8 +8,8 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { getAgents, subscribeAgentEvents } from '@/lib/api';
-import type { AgentInfo } from '@/lib/types';
+import { getAgents, getModels, subscribeAgentEvents } from '@/lib/api';
+import type { AgentInfo, ModelItem } from '@/lib/types';
 
 export type AgentUsage = { inputTokens: number; outputTokens: number };
 
@@ -24,6 +24,7 @@ type AgentContextValue = {
   // Last reported token usage per agent, for context-left display.
   usage: Record<string, AgentUsage>;
   setUsage: (agentId: string, u: AgentUsage) => void;
+  models: ModelItem[];
 };
 
 const AgentContext = createContext<AgentContextValue>({
@@ -35,6 +36,7 @@ const AgentContext = createContext<AgentContextValue>({
   clearLivePreview: () => {},
   usage: {},
   setUsage: () => {},
+  models: [],
 });
 
 export function AgentProvider({ children }: { children: ReactNode }) {
@@ -42,6 +44,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [livePreview, setLive] = useState<Record<string, string>>({});
   const [usage, setUsageMap] = useState<Record<string, AgentUsage>>({});
+  const [models, setModels] = useState<ModelItem[]>([]);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
 
   const setUsage = useCallback((agentId: string, u: AgentUsage) => {
@@ -63,6 +66,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     getAgents().then(setAgents).catch(console.error);
+    getModels().then(setModels).catch(console.error);
     const unsubscribe = subscribeAgentEvents(
       (snapshot) => setAgents(snapshot),
       (error) => console.error(error),
@@ -81,6 +85,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         clearLivePreview,
         usage,
         setUsage,
+        models,
       }}
     >
       {children}
@@ -115,4 +120,8 @@ export function useAgentUsage(): {
 } {
   const ctx = useContext(AgentContext);
   return { usage: ctx.usage, setUsage: ctx.setUsage };
+}
+
+export function useModelsFeed(): { models: ModelItem[] } {
+  return { models: useContext(AgentContext).models };
 }

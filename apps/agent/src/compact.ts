@@ -7,11 +7,30 @@ import {
   renderMemoryIndex,
 } from '@agent-os/core';
 import {
+  type AgentUsage,
   loadThread,
   saveThread,
+  saveUsage,
   type UIMessage,
   uiMessagesToChat,
 } from './thread.js';
+
+// Rough token estimate for a trimmed thread, used after compaction.
+async function estimateThreadTokens(
+  _homeDir: string,
+  messages: UIMessage[],
+): Promise<AgentUsage> {
+  let chars = 0;
+  for (const m of messages) {
+    for (const p of m.parts ?? []) {
+      if (p.type === 'text') chars += p.text.length;
+      if (p.type === 'tool-call') chars += JSON.stringify(p.args).length;
+      if (p.type === 'tool-result') chars += p.result.length;
+    }
+  }
+  const tokens = Math.ceil(chars / 4);
+  return { inputTokens: tokens, outputTokens: 0 };
+}
 
 export const COMPACT_IDLE_MS = Number(
   process.env.AGENT_OS_COMPACT_IDLE_MS ?? 5 * 60 * 1000,
@@ -96,6 +115,9 @@ export function scheduleCompaction(deps: CompactionDeps): () => void {
           ...keep,
         ];
         await saveThread(deps.homeDir, compacted);
+        // Recompute context usage against the trimmed thread.
+        const keptTokens = await estimateThreadTokens(deps.homeDir, compacted);
+        await saveUsage(deps.homeDir, keptTokens);
       }
     } catch (err) {
       console.error('Compaction failed', err);

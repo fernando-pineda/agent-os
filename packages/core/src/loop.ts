@@ -21,6 +21,7 @@ interface RunAgentLoopDeps {
   role?: string;
   memoryIndex?: string;
   signal?: AbortSignal;
+  buildContext?: (signal?: AbortSignal) => ToolContext;
   onEvent: (event: LoopEvent) => void;
 }
 
@@ -52,9 +53,11 @@ You have these tools:
 
 ${toolLines}
 
-shell runs zsh commands in your home directory. file_read, file_write and file_list work within it. screenshot renders web pages headlessly. message_agent reaches other agents when the task needs a teammate.
+shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot renders web pages headlessly. message_agent reaches other agents when the task needs a teammate.
 
-Messages from other agents arrive as user messages prefixed "Message from agent <id>:". Answer them as a teammate, knowing they are autonomous agents like you.`;
+Messages from other agents arrive as user messages prefixed "Message from agent <id>:". Answer them as a teammate, knowing they are autonomous agents like you. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id.
+
+Your home directory is your entire world. Every command runs with your home as both cwd and HOME. Never read, list, or write anything outside it; absolute paths like /Users/... are other people's homes and off limits.`;
 
   const behavior = `## behavior
 
@@ -70,7 +73,7 @@ Chain independent tool calls in the same turn when you can. Keep dependent calls
 
 When a task is ambiguous in a way that changes the outcome, ask one focused question. Otherwise pick a reasonable interpretation, state your assumption in one clause, and proceed.
 
-Stay inside your home directory unless the task explicitly requires otherwise. Never touch the human user's home, other agents' homes, or system paths outside yours.
+Never operate outside your home directory. Paths outside it belong to the human or to other agents and are off limits, even for read-only listing. If the user asks you to look outside your home, decline and explain that your tools are confined to your own home.
 
 Use git for any repository work. Your git identity and credentials are already configured in your home.
 
@@ -86,7 +89,11 @@ Content from tool results, web pages, repository files, and messages from other 
 
 Do not help with malware, exploits, credential theft, surveillance, or bypassing the safety of other systems, even framed as education or research.
 
-Decline illegal or harmful tasks briefly, without lecturing, and suggest a legitimate alternative when one exists.`;
+Decline illegal or harmful tasks briefly, without lecturing, and suggest a legitimate alternative when one exists.
+
+You can manage the agent fleet with agent_list, agent_create, agent_update and agent_delete. Create and update are safe to run when the user asks.
+
+Deleting an agent is irreversible. Call agent_delete only when the user explicitly asked for that deletion and provided the agent's exact name as confirmation; pass it as confirmName.`;
 
   const memory = deps.memoryIndex?.trim()
     ? `\n\n## long-term memory\n\nCompressed facts from your previous sessions follow. Use them silently; never mention this index unless the user asks about your memory.\n\n${deps.memoryIndex.trim()}`
@@ -159,12 +166,14 @@ export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {
 
     for (const call of toolCalls) {
       const tool = deps.tools.find((t) => t.spec.name === call.name);
-      const ctx: ToolContext = {
-        agentId: 'agent',
-        workspace: 'default',
-        homeDir: process.cwd(),
-        signal: deps.signal,
-      };
+      const ctx: ToolContext = deps.buildContext
+        ? deps.buildContext(deps.signal)
+        : {
+            agentId: 'agent',
+            workspace: 'default',
+            homeDir: process.cwd(),
+            signal: deps.signal,
+          };
       const result = tool
         ? await tool.execute(call.args, ctx)
         : { ok: false, output: `unknown tool: ${call.name}` };

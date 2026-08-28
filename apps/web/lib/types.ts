@@ -32,6 +32,7 @@ export interface OnboardingPayload {
 export interface ModelItem {
   id: string;
   supportsTools: boolean;
+  contextLength?: number;
 }
 
 export interface ModelsResponse {

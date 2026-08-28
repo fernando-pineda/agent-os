@@ -52,7 +52,11 @@ export const shell: Tool = {
       child = execFile(
         'zsh',
         ['-lc', command],
-        { cwd: ctx.homeDir, env: { ...process.env, ...ctx.env } },
+        {
+          cwd: ctx.homeDir,
+          // HOME is pinned so ~ always resolves inside the agent home.
+          env: { ...process.env, ...ctx.env, HOME: ctx.homeDir },
+        },
         (error, rawStdout, rawStderr) => {
           const out = truncate(rawStdout, MAX_OUTPUT);
           const err = truncate(rawStderr, MAX_OUTPUT);
