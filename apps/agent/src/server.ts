@@ -365,6 +365,10 @@ function handleStreamEvent(
     controller?.appendText(event.delta);
     if (last?.kind === 'text') {
       last.text = (last.text ?? '') + event.delta;
+    } else if (last?.kind === 'tool') {
+      // Text after a tool continues the same message; keep it as a new
+      // text segment so the grouper appends it to the tool message.
+      segments.push({ kind: 'text', text: event.delta });
     } else {
       segments.push({ kind: 'text', text: event.delta });
     }
@@ -445,21 +449,20 @@ async function persistTurn(
       }
       current.parts = parts;
     } else if (seg.kind === 'tool' && seg.toolCallId) {
-      flush();
-      current = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        parts: [
-          {
-            type: 'tool-call',
-            toolCallId: seg.toolCallId,
-            toolName: seg.toolName ?? '',
-            args: seg.args ?? {},
-            ...(seg.result !== undefined && { result: seg.result }),
-            ...(seg.isError !== undefined && { isError: seg.isError }),
-          },
-        ],
-      };
+      // Tool call joins the current message; following text continues it.
+      if (!current) {
+        current = { id: crypto.randomUUID(), role: 'assistant' };
+      }
+      const parts = current.parts ?? [];
+      parts.push({
+        type: 'tool-call',
+        toolCallId: seg.toolCallId,
+        toolName: seg.toolName ?? '',
+        args: seg.args ?? {},
+        ...(seg.result !== undefined && { result: seg.result }),
+        ...(seg.isError !== undefined && { isError: seg.isError }),
+      });
+      current.parts = parts;
     }
   }
   flush();
