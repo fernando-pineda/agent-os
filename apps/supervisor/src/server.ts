@@ -210,6 +210,7 @@ async function handle(
         res.end(JSON.stringify({ error: 'Agent not found' }));
         return;
       }
+      statusTracker.refreshAgent(updated);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(updated));
       return;

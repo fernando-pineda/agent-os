@@ -14,6 +14,7 @@ const HEALTH_TIMEOUT_MS = 1000;
 export interface StatusTracker {
   getAgents(): AgentInfo[];
   getAgent(id: string): AgentInfo | undefined;
+  refreshAgent(config: AgentConfig): void;
   updateStatus(id: string, status: AgentStatus, currentTaskId?: string): void;
   removeAgent(id: string): void;
   onChange(listener: () => void): () => void;
@@ -64,6 +65,19 @@ export class StatusTrackerImpl implements StatusTracker {
 
   getAgent(id: string): AgentInfo | undefined {
     return this.info.get(id);
+  }
+
+  // Rebuild one agent from its config (PATCH path), keep live status.
+  refreshAgent(config: AgentConfig): void {
+    const existing = this.info.get(config.id);
+    const status = existing?.status ?? 'stopped';
+    const info = toAgentInfo(config, status, existing?.model ?? 'unknown');
+    if (existing?.currentTaskId) {
+      info.currentTaskId = existing.currentTaskId;
+    }
+    info.lastEventAt = new Date().toISOString();
+    this.info.set(config.id, info);
+    this.notify();
   }
 
   updateStatus(id: string, status: AgentStatus, currentTaskId?: string): void {
