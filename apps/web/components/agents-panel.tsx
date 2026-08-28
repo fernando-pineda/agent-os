@@ -48,6 +48,8 @@ import {
   AGENT_AVATAR_DEFAULT_COLOR,
   AGENT_CHARACTERS,
   type AgentAvatar,
+  avatarImagePath,
+  avatarTileBackground,
 } from '@/lib/avatars';
 import type { AgentInfo, AgentStatus, ModelItem } from '@/lib/types';
 
@@ -78,19 +80,6 @@ function truncateModel(model: string): string {
   if (model.length <= 32) return model;
   const parts = model.split('/');
   return parts[parts.length - 1] ?? model;
-}
-
-function avatarImagePath(character: string): string {
-  return `/characters/${character}.png`;
-}
-
-// Tile background: vertical gradient from a lightened top to the picked color.
-function avatarTileBackground(color: string): string {
-  const n = parseInt(color.slice(1), 16);
-  const r = Math.min(255, ((n >> 16) & 0xff) + 56);
-  const g = Math.min(255, ((n >> 8) & 0xff) + 56);
-  const b = Math.min(255, (n & 0xff) + 56);
-  return `linear-gradient(135deg, rgb(${r}, ${g}, ${b}) 0%, ${color} 65%)`;
 }
 
 function AgentForm({

@@ -35,3 +35,15 @@ export interface AgentAvatar {
   character: string;
   color: string;
 }
+
+export function avatarImagePath(character: string): string {
+  return `/characters/${character}.png`;
+}
+
+export function avatarTileBackground(color: string): string {
+  const n = parseInt(color.slice(1), 16);
+  const r = Math.min(255, ((n >> 16) & 0xff) + 56);
+  const g = Math.min(255, ((n >> 8) & 0xff) + 56);
+  const b = Math.min(255, (n & 0xff) + 56);
+  return `linear-gradient(135deg, rgb(${r}, ${g}, ${b}) 0%, ${color} 65%)`;
+}
