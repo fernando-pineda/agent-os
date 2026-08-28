@@ -333,11 +333,11 @@ export function AgentsPanel() {
           >
             + New
           </DialogTrigger>
-          <DialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100">
+          <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
             <DialogHeader>
               <DialogTitle>New agent</DialogTitle>
             </DialogHeader>
-            <div className="space-y-3 py-2">
+            <div className="space-y-3 overflow-y-auto py-2 pr-1">
               <div>
                 <label className="mb-1 block text-xs text-zinc-400">Name</label>
                 <Input
@@ -551,14 +551,14 @@ export function AgentsPanel() {
 
       {/* Edit dialog */}
       <Dialog open={editDialog !== null} onOpenChange={closeEditDialog}>
-        <DialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit {editDialog?.name}</DialogTitle>
             <DialogDescription className="text-zinc-400">
               Update the agent's configuration. Changes apply immediately.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 overflow-y-auto py-2 pr-1">
             <div>
               <label className="mb-1 block text-xs text-zinc-400">Name</label>
               <Input
