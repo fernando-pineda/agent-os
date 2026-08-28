@@ -22,7 +22,13 @@ export interface AgentConfig {
   createdAt: string;
 }
 
-export type AgentStatus = 'starting' | 'online' | 'busy' | 'error' | 'stopped';
+export type AgentStatus =
+  | 'starting'
+  | 'online'
+  | 'busy'
+  | 'compressing'
+  | 'error'
+  | 'stopped';
 
 export interface AgentInfo {
   id: string;

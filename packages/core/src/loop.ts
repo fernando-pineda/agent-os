@@ -19,6 +19,7 @@ interface RunAgentLoopDeps {
   messages: ChatMessage[];
   agentId?: string;
   role?: string;
+  memoryIndex?: string;
   signal?: AbortSignal;
   onEvent: (event: LoopEvent) => void;
 }
@@ -43,7 +44,11 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     'Answer in the same language the user writes in.',
   ].join(' ');
 
-  return `${identity}\n\n${capabilities}\n\n${behavior}`;
+  const memory = deps.memoryIndex?.trim()
+    ? `\n\nLong-term memory from previous sessions follows. Use it silently; never mention this index unless the user asks about your memory.\n\n${deps.memoryIndex.trim()}`
+    : '';
+
+  return `${identity}\n\n${capabilities}\n\n${behavior}${memory}`;
 }
 
 export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {

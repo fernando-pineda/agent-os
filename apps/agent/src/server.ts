@@ -6,6 +6,7 @@ import {
 import { json } from 'node:stream/consumers';
 import type {
   AgentConfig,
+  AgentStatus,
   ChatMessage,
   LLMClient,
   LoopEvent,
@@ -20,6 +21,7 @@ import {
   ToolResponse,
 } from 'assistant-stream';
 import type { ReadonlyJSONValue } from 'assistant-stream/utils';
+import { loadMemoryIndex } from './compact.js';
 import { myPort, readRegistry } from './registry.js';
 import {
   loadThread,
@@ -27,8 +29,6 @@ import {
   type UIMessage,
   uiMessagesToChat,
 } from './thread.js';
-
-export type AgentStatus = 'starting' | 'online' | 'busy' | 'error' | 'stopped';
 
 export interface ServerDeps {
   agentId: string;
@@ -50,6 +50,7 @@ export interface AgentServer {
   stop: () => Promise<void>;
   setStatus: (status: AgentStatus) => void;
   setCurrentTaskId: (taskId: string | undefined) => void;
+  isBusy: () => boolean;
 }
 
 interface ToolCallContext {
@@ -207,6 +208,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     },
     setStatus,
     setCurrentTaskId,
+    isBusy: () => running,
   };
 
   async function handleChat(
@@ -229,6 +231,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     return createAssistantStreamResponse(
       async (streamController: AssistantStreamController) => {
         try {
+          const memoryIndex = await loadMemoryIndex(serverDeps.homeDir);
           await runAgentLoop({
             llm: serverDeps.llm,
             tools: serverDeps.tools,
@@ -236,6 +239,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             messages: chatMessages,
             agentId: serverDeps.agentId,
             ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
+            ...(memoryIndex ? { memoryIndex } : {}),
             signal: controller.signal,
             onEvent: (event: LoopEvent) => {
               handleStreamEvent(

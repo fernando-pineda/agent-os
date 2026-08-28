@@ -1,16 +1,19 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
-import type { AgentConfig, LLMClient, Tool, ToolContext } from '@agent-os/core';
+import type {
+  AgentConfig,
+  AgentStatus,
+  LLMClient,
+  Tool,
+  ToolContext,
+} from '@agent-os/core';
 import { FireworksLLMClient, MockLLMClient } from '@agent-os/core';
 import { wrapWithSandbox } from '@agent-os/sandbox';
 import { defaultTools, messageAgent, TmuxSession } from '@agent-os/tools';
+import { scheduleCompaction } from './compact.js';
 import { loadAgentConfig } from './config.js';
-import {
-  type AgentStatus,
-  createAgentServer,
-  sendAgentMessageHttp,
-} from './server.js';
+import { createAgentServer, sendAgentMessageHttp } from './server.js';
 
 const rawAgentId = process.argv[2] ?? process.env.AGENT_ID;
 if (!rawAgentId || typeof rawAgentId !== 'string') {
@@ -76,11 +79,25 @@ async function main(): Promise<void> {
   server.setStatus('online');
   _currentStatus = 'online';
 
+  const stopCompaction = scheduleCompaction({
+    homeDir,
+    llm,
+    model,
+    setStatus: (s) => server.setStatus(s),
+    isBusy: () => server.isBusy(),
+  });
+
   const port = await server.start();
   console.log(`Agent HTTP server listening on http://localhost:${port}`);
 
-  process.on('SIGTERM', () => shutdown(server));
-  process.on('SIGINT', () => shutdown(server));
+  process.on('SIGTERM', () => {
+    stopCompaction();
+    void shutdown(server);
+  });
+  process.on('SIGINT', () => {
+    stopCompaction();
+    void shutdown(server);
+  });
 
   process.on('uncaughtException', (err: Error) => {
     console.error('Uncaught exception', err);

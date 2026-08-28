@@ -22,6 +22,8 @@ function statusColor(status: AgentStatus): string {
       return 'bg-emerald-400';
     case 'busy':
       return 'bg-blue-400';
+    case 'compressing':
+      return 'bg-violet-400';
     case 'error':
       return 'bg-red-400';
     case 'stopped':
@@ -32,7 +34,7 @@ function statusColor(status: AgentStatus): string {
 }
 
 function isPulsing(status: AgentStatus): boolean {
-  return status === 'starting' || status === 'busy';
+  return status === 'starting' || status === 'busy' || status === 'compressing';
 }
 
 function truncateModel(model: string): string {

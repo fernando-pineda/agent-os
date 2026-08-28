@@ -25,13 +25,15 @@ function AgentHeader() {
     <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-3">
       <span
         className={`h-2.5 w-2.5 rounded-full ${
-          agent.status === 'starting' || agent.status === 'busy'
-            ? 'status-pulse bg-blue-400'
-            : agent.status === 'online'
-              ? 'bg-emerald-400'
-              : agent.status === 'error'
-                ? 'bg-red-400'
-                : 'bg-zinc-500'
+          agent.status === 'compressing'
+            ? 'status-pulse bg-violet-400'
+            : agent.status === 'starting' || agent.status === 'busy'
+              ? 'status-pulse bg-blue-400'
+              : agent.status === 'online'
+                ? 'bg-emerald-400'
+                : agent.status === 'error'
+                  ? 'bg-red-400'
+                  : 'bg-zinc-500'
         }`}
       />
       <div className="min-w-0 flex-1">
@@ -49,6 +51,9 @@ function AgentHeader() {
           <span className="font-mono">{agent.model}</span>
           {agent.workspace !== agent.id && (
             <span className="font-mono">workspace:{agent.workspace}</span>
+          )}
+          {agent.status === 'compressing' && (
+            <span className="text-violet-400">compressing session...</span>
           )}
         </div>
       </div>
