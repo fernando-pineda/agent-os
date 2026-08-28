@@ -158,6 +158,7 @@ export async function updateAgentConfig(
     sandboxed?: boolean | undefined;
     avatar?: AgentAvatar | undefined;
     instructions?: string | undefined;
+    plugins?: string[] | undefined;
   },
 ): Promise<AgentConfig | null> {
   const config = await readAgentConfig(id);
@@ -171,6 +172,7 @@ export async function updateAgentConfig(
   if (patch.avatar !== undefined) config.avatar = patch.avatar;
   if (patch.instructions !== undefined)
     config.instructions = patch.instructions;
+  if (patch.plugins !== undefined) config.plugins = patch.plugins;
   if (patch.workspace !== undefined) {
     const validationError = validateWorkspace(patch.workspace);
     if (validationError) {
@@ -520,6 +522,9 @@ export function toAgentInfo(
   }
   if (config.instructions) {
     info.instructions = config.instructions;
+  }
+  if (config.plugins) {
+    info.plugins = config.plugins;
   }
   return info;
 }

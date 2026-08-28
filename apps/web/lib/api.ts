@@ -3,11 +3,15 @@ import type {
   AgentInfo,
   AgentsResponse,
   CreateAgentPayload,
+  GlobalConfigStatus,
   ModelItem,
   ModelsResponse,
   OnboardingPayload,
   OnboardingStatus,
+  PluginInfo,
+  PluginsResponse,
   UpdateAgentPayload,
+  UpdateConfigPayload,
 } from '@/lib/types';
 
 // Direct to the supervisor; the Next rewrite buffers SSE and breaks events.
@@ -127,6 +131,25 @@ export async function getMessages(agentId: string): Promise<UIMessage[]> {
   const res = await fetch(`${BASE}/api/agents/${agentId}/messages`);
   if (!res.ok) throw new Error(`messages failed: ${res.status}`);
   return res.json();
+}
+
+export async function getPlugins(): Promise<PluginInfo[]> {
+  const res = await fetchJson<PluginsResponse>(`${BASE}/api/plugins`);
+  return res.plugins;
+}
+
+export async function getConfig(): Promise<GlobalConfigStatus> {
+  return fetchJson<GlobalConfigStatus>(`${BASE}/api/config`);
+}
+
+export async function updateConfig(
+  payload: UpdateConfigPayload,
+): Promise<GlobalConfigStatus> {
+  return fetchJson<GlobalConfigStatus>(`${BASE}/api/config`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function subscribeAgentEvents(

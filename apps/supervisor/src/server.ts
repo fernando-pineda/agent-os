@@ -12,7 +12,9 @@ import {
   listModels,
   onboard,
   readGlobalConfig,
+  updateGlobalConfig,
 } from './onboarding.js';
+import { PLUGIN_NAMES, PLUGINS } from './plugins.js';
 import type { CreateAgentInput, Registry } from './registry.js';
 import {
   createAgent,
@@ -101,6 +103,48 @@ async function handle(
     );
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (pathname === '/api/config' && req.method === 'GET') {
+    const config = await readGlobalConfig();
+    if (!config) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not configured' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        provider: config.provider,
+        apiKey: maskApiKey(config.apiKey),
+        defaultModel: config.defaultModel,
+      }),
+    );
+    return;
+  }
+
+  if (pathname === '/api/config' && req.method === 'PATCH') {
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const patch: { apiKey?: string; defaultModel?: string } = {};
+    if (typeof body.apiKey === 'string') patch.apiKey = body.apiKey;
+    if (typeof body.defaultModel === 'string')
+      patch.defaultModel = body.defaultModel;
+    const updated = await updateGlobalConfig(patch);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        provider: updated.provider,
+        apiKey: maskApiKey(updated.apiKey),
+        defaultModel: updated.defaultModel,
+      }),
+    );
+    return;
+  }
+
+  if (pathname === '/api/plugins' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ plugins: PLUGINS }));
     return;
   }
 
@@ -206,6 +250,17 @@ async function handle(
     if (body.avatar !== undefined) {
       const avatar = validateAvatar(body.avatar);
       if (avatar) patch.avatar = avatar;
+    }
+    if (Array.isArray(body.plugins)) {
+      const names = body.plugins as unknown[];
+      for (const n of names) {
+        if (typeof n !== 'string' || !PLUGIN_NAMES.has(n)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Unknown plugin: ${String(n)}` }));
+          return;
+        }
+      }
+      patch.plugins = names as string[];
     }
     try {
       const updated = await updateAgentConfig(id, patch);
@@ -445,6 +500,13 @@ function readBuffer(req: IncomingMessage): Promise<Buffer> {
     });
     req.on('error', reject);
   });
+}
+
+function maskApiKey(key: string): string {
+  if (key.length <= 4) {
+    return '•'.repeat(key.length);
+  }
+  return `••••${key.slice(-4)}`;
 }
 
 const AGENT_CHARACTERS = [

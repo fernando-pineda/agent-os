@@ -261,6 +261,14 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       async (streamController: AssistantStreamController) => {
         try {
           const memoryIndex = await loadMemoryIndex(serverDeps.homeDir);
+          // Persist incrementally so a reload mid-run keeps the turn so far.
+          const persistPartial = async (): Promise<void> => {
+            try {
+              await persistTurn(messages, segments, serverDeps);
+            } catch {
+              // ignore partial write errors
+            }
+          };
           await runAgentLoop({
             llm: serverDeps.llm,
             tools: serverDeps.tools,
@@ -287,6 +295,14 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
                 toolContexts,
                 segments,
               );
+              // Persist incrementally on each completed segment boundary.
+              if (
+                event.type === 'tool-call' ||
+                event.type === 'tool-result' ||
+                event.type === 'done'
+              ) {
+                void persistPartial();
+              }
             },
           });
           await persistTurn(messages, segments, serverDeps);

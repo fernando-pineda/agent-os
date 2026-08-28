@@ -44,6 +44,7 @@ interface AgentConfig {
     sshKeyPath?: string;   // key in the agent user's ~/.ssh, referenced from its ssh config
   };
   sandboxed?: boolean;   // wrap task shell commands in sandbox-exec profile
+  plugins?: string[];    // enabled tool names; absent/undefined = all enabled
   createdAt: string;
 }
 ```
@@ -72,6 +73,7 @@ interface AgentInfo {
   tmuxSession: string; // e.g. "agent-os-<id>"
   currentTaskId?: string;
   lastEventAt?: string;
+  plugins?: string[];    // enabled tool names; absent/undefined = all enabled
 }
 ```
 
@@ -218,9 +220,13 @@ type AgentCommand = { type: "cancel"; taskId: string };
 
 - `GET /api/onboarding/status` -> `{ configured: boolean }`
 - `POST /api/onboarding` body `{ provider: "fireworks", apiKey: string, defaultModel: string }` -> writes `~/.agent-os/config.json`, returns `{ ok: true }`
+- `GET /api/config` -> `{ provider: "fireworks", apiKey: string (masked, last 4 chars), defaultModel: string }` (404 `{ error: "not configured" }` if no config)
+- `PATCH /api/config` body `{ apiKey?: string, defaultModel?: string }` -> updates config (apiKey only overwritten when non-empty), returns masked config same as GET
+- `GET /api/plugins` -> `{ plugins: { name: string, description: string }[] }` catalog of built-in tools
 - `GET /api/models` -> `{ models: { id: string; supportsTools: boolean }[] }` proxied from Fireworks, cached 5 min
 - `GET /api/agents` -> `{ agents: AgentInfo[] }`
 - `POST /api/agents` body `{ name: string; group?: string; model?: string }` -> creates agent (home dir, config, tmux session, process), returns `AgentInfo`
+- `PATCH /api/agents/{id}` body `{ name?; group?; role?; instructions?; model?; workspace?; sandboxed?; avatar?; plugins?: string[] }` -> updates config (plugins validated against GET /api/plugins names), returns updated `AgentConfig`
 - `POST /api/agents/{id}/stop` and `POST /api/agents/{id}/start`
 - `GET /api/agents/events` SSE stream of `AgentInfo` snapshots (sidebar)
 - `POST /api/agents/{id}/chat` proxy to the agent AI SDK endpoint (streams through)

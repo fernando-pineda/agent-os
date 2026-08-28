@@ -152,13 +152,17 @@ function buildTools(
   sandboxed: boolean,
   homeDir: string,
   workspace: string,
-  _agent: AgentConfig,
+  agent: AgentConfig,
 ): Tool[] {
   const base = defaultTools();
+  const enabled = agent.plugins;
+  const filtered = enabled
+    ? base.filter((t) => enabled.includes(t.spec.name))
+    : base;
   if (!sandboxed) {
-    return base;
+    return filtered;
   }
-  return base.map((tool) => {
+  return filtered.map((tool) => {
     if (tool.spec.name === 'shell') {
       return wrapWithSandbox(tool, 'agentShell', { workspace, homeDir });
     }

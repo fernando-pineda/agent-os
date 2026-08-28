@@ -1,5 +1,6 @@
 export type AgentStatus =
   | 'starting'
+  | 'running'
   | 'online'
   | 'busy'
   | 'compressing'
@@ -24,6 +25,7 @@ export interface AgentInfo {
   lastEventAt?: string;
   avatar?: AgentAvatar;
   instructions?: string;
+  plugins?: string[];
 }
 
 export interface OnboardingStatus {
@@ -69,4 +71,25 @@ export interface UpdateAgentPayload {
   sandboxed?: boolean;
   avatar?: AgentAvatar;
   instructions?: string;
+  plugins?: string[];
+}
+
+export interface GlobalConfigStatus {
+  provider: 'fireworks';
+  apiKey: string;
+  defaultModel: string;
+}
+
+export interface UpdateConfigPayload {
+  apiKey?: string;
+  defaultModel?: string;
+}
+
+export interface PluginInfo {
+  name: string;
+  description: string;
+}
+
+export interface PluginsResponse {
+  plugins: PluginInfo[];
 }

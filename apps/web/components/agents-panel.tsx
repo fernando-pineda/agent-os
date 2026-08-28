@@ -1,6 +1,12 @@
 'use client';
 
-import { PencilIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
+import {
+  PencilIcon,
+  PlayIcon,
+  SettingsIcon,
+  SquareIcon,
+  Trash2Icon,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   useAgentSelection,
@@ -8,6 +14,7 @@ import {
   useGroupsFeed,
 } from '@/components/agent-context';
 import { ModelPickerModal } from '@/components/model-picker-modal';
+import { SettingsDialog } from '@/components/settings-dialog';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -455,6 +462,7 @@ export function AgentsPanel() {
   const [groupName, setGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupError, setGroupError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     setLoadingModels(true);
@@ -743,6 +751,19 @@ export function AgentsPanel() {
           ))}
         </ul>
       </div>
+
+      <div className="border-t border-zinc-800 p-3">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sm text-zinc-400"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <SettingsIcon />
+          Settings
+        </Button>
+      </div>
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* New group dialog */}
       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>

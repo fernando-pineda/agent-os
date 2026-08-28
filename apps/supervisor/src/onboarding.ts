@@ -5,6 +5,10 @@ import type { GlobalConfig } from '@agent-os/core';
 
 const configPath = join(homedir(), '.agent-os', 'config.json');
 
+export function resetModelCache(): void {
+  modelCache = undefined;
+}
+
 interface OnboardingInput {
   provider: 'fireworks';
   apiKey: string;
@@ -56,6 +60,29 @@ export async function onboard(input: OnboardingInput): Promise<void> {
     mode: 0o600,
     encoding: 'utf-8',
   });
+}
+
+export async function updateGlobalConfig(patch: {
+  apiKey?: string;
+  defaultModel?: string;
+}): Promise<GlobalConfig> {
+  const current = await readGlobalConfig();
+  if (!current) {
+    throw new Error('Not configured');
+  }
+  if (patch.apiKey !== undefined && patch.apiKey !== '') {
+    current.apiKey = patch.apiKey;
+  }
+  if (patch.defaultModel !== undefined) {
+    current.defaultModel = patch.defaultModel;
+  }
+  await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
+  await writeFile(configPath, JSON.stringify(current, null, 2), {
+    mode: 0o600,
+    encoding: 'utf-8',
+  });
+  resetModelCache();
+  return current;
 }
 
 export async function listModels(): Promise<{

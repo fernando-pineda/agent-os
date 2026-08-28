@@ -26,6 +26,7 @@ export interface AgentConfig {
   sandboxed?: boolean;
   avatar?: AgentAvatar;
   instructions?: string;
+  plugins?: string[];
   createdAt: string;
 }
 
@@ -50,6 +51,7 @@ export interface AgentInfo {
   lastEventAt?: string;
   avatar?: AgentAvatar;
   instructions?: string;
+  plugins?: string[];
 }
 
 export interface ToolSpec {

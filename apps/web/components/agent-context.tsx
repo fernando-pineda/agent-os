@@ -32,6 +32,7 @@ type AgentContextValue = {
   models: ModelItem[];
   groups: string[];
   refreshGroups: () => void;
+  refreshModels: () => void;
 };
 
 const AgentContext = createContext<AgentContextValue>({
@@ -46,6 +47,7 @@ const AgentContext = createContext<AgentContextValue>({
   models: [],
   groups: [],
   refreshGroups: () => {},
+  refreshModels: () => {},
 });
 
 export function AgentProvider({ children }: { children: ReactNode }) {
@@ -58,6 +60,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   const refreshGroups = useCallback(() => {
     getGroups().then(setGroups).catch(console.error);
+  }, []);
+  const refreshModels = useCallback(() => {
+    getModels().then(setModels).catch(console.error);
   }, []);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
 
@@ -103,6 +108,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         models,
         groups,
         refreshGroups,
+        refreshModels,
       }}
     >
       {children}
