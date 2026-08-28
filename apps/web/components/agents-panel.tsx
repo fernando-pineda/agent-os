@@ -30,6 +30,7 @@ import {
   createAgent,
   createGroup,
   deleteAgent,
+  deleteGroup,
   getModels,
   startAgent,
   stopAgent,
@@ -257,6 +258,7 @@ function GroupSection({
   selectedAgentId,
   onSelect,
   onDropAgent,
+  onDeleteGroup,
   openEditDialog,
   toggleStartStop,
   openDeleteDialog,
@@ -266,6 +268,7 @@ function GroupSection({
   selectedAgentId: string | null;
   onSelect: (id: string) => void;
   onDropAgent: (agentId: string, group: string) => void;
+  onDeleteGroup: (name: string) => void;
   openEditDialog: (agent: AgentInfo) => void;
   toggleStartStop: (agent: AgentInfo) => void;
   openDeleteDialog: (agent: AgentInfo) => void;
@@ -282,19 +285,37 @@ function GroupSection({
     const agentId = e.dataTransfer.getData('text/agent-id');
     if (agentId) onDropAgent(agentId, name);
   };
+  const header = (
+    <li
+      className={`sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-400 ${
+        dragOver ? 'bg-zinc-800' : ''
+      }`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <span>{name || 'Ungrouped'}</span>
+      <span className="text-zinc-600">{agents.length}</span>
+    </li>
+  );
   return (
     <>
-      <li
-        className={`sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-400 ${
-          dragOver ? 'bg-zinc-800' : ''
-        }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        <span>{name || 'Ungrouped'}</span>
-        <span className="text-zinc-600">{agents.length}</span>
-      </li>
+      {name ? (
+        <ContextMenu>
+          <ContextMenuTrigger render={header} />
+          <ContextMenuContent>
+            <ContextMenuItem
+              onClick={() => onDeleteGroup(name)}
+              className="text-red-400 focus:bg-red-950/50 focus:text-red-300"
+            >
+              <Trash2Icon className="size-4" />
+              Delete group
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        header
+      )}
       {agents.length === 0 ? (
         <li
           className={`px-3 py-3 text-center text-xs text-zinc-600 ${
@@ -508,6 +529,13 @@ export function AgentsPanel() {
     void updateAgent(agentId, { group: targetGroup || undefined });
   }, []);
 
+  const onDeleteGroup = useCallback(
+    (name: string) => {
+      void deleteGroup(name).then(() => refreshGroups());
+    },
+    [refreshGroups],
+  );
+
   const toggleStartStop = useCallback(async (agent: AgentInfo) => {
     try {
       if (agent.status === 'online' || agent.status === 'busy') {
@@ -710,6 +738,7 @@ export function AgentsPanel() {
               selectedAgentId={selectedAgentId}
               onSelect={setSelectedAgentId}
               onDropAgent={onDropAgent}
+              onDeleteGroup={onDeleteGroup}
               openEditDialog={openEditDialog}
               toggleStartStop={toggleStartStop}
               openDeleteDialog={openDeleteDialog}
