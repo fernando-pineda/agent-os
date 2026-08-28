@@ -4,7 +4,7 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { URL } from 'node:url';
-import type { AgentInfo } from '@agent-os/core';
+import type { AgentAvatar, AgentInfo } from '@agent-os/core';
 import { installLaunchdAgent, uninstallLaunchdAgent } from './launchd.js';
 import {
   isConfigured,
@@ -116,11 +116,22 @@ async function handle(
   }
 
   if (pathname === '/api/agents' && req.method === 'POST') {
-    const body = await readJson(req);
+    const raw = await readJson(req);
+    const body = raw as Record<string, unknown>;
+    const input: CreateAgentInput = { name: String(body.name ?? '') };
+    if (typeof body.group === 'string') input.group = body.group;
+    if (typeof body.workspace === 'string') input.workspace = body.workspace;
+    if (typeof body.role === 'string') input.role = body.role;
+    if (typeof body.model === 'string') input.model = body.model;
+    if (typeof body.sandboxed === 'boolean') input.sandboxed = body.sandboxed;
+    if (body.avatar !== undefined) {
+      const avatar = validateAvatar(body.avatar);
+      if (avatar) input.avatar = avatar;
+    }
     const config = await readGlobalConfig();
     const result = await createAgent(
       registry,
-      body as CreateAgentInput,
+      input,
       config?.defaultModel ?? 'unknown-model',
     );
     if (result.error) {
@@ -145,6 +156,10 @@ async function handle(
     if (typeof body.model === 'string') patch.model = body.model;
     if (typeof body.workspace === 'string') patch.workspace = body.workspace;
     if (typeof body.sandboxed === 'boolean') patch.sandboxed = body.sandboxed;
+    if (body.avatar !== undefined) {
+      const avatar = validateAvatar(body.avatar);
+      if (avatar) patch.avatar = avatar;
+    }
     try {
       const updated = await updateAgentConfig(id, patch);
       if (!updated) {
@@ -382,6 +397,29 @@ function readBuffer(req: IncomingMessage): Promise<Buffer> {
     });
     req.on('error', reject);
   });
+}
+
+const AGENT_CHARACTERS = [
+  'layer-blue-pyramid-character',
+  'layer-dark-bat-character',
+  'layer-green-cactus-character',
+  'layer-orange-sun-character',
+  'layer-pink-cloud-character',
+  'layer-purple-donut-character',
+  'layer-purple-slime-character',
+  'layer-teal-blob-character',
+  'layer-yellow-star-character',
+];
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function validateAvatar(value: unknown): AgentAvatar | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as { character?: unknown; color?: unknown };
+  if (typeof candidate.character !== 'string') return null;
+  if (typeof candidate.color !== 'string') return null;
+  if (!AGENT_CHARACTERS.includes(candidate.character)) return null;
+  if (!HEX_COLOR_RE.test(candidate.color)) return null;
+  return { character: candidate.character, color: candidate.color };
 }
 
 async function shutdown(

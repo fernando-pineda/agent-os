@@ -5,6 +5,11 @@ export interface GlobalConfig {
   createdAt: string;
 }
 
+export interface AgentAvatar {
+  character: string;
+  color: string;
+}
+
 export interface AgentConfig {
   id: string;
   name: string;
@@ -19,6 +24,7 @@ export interface AgentConfig {
     sshKeyPath?: string;
   };
   sandboxed?: boolean;
+  avatar?: AgentAvatar;
   createdAt: string;
 }
 
@@ -41,6 +47,7 @@ export interface AgentInfo {
   tmuxSession: string;
   currentTaskId?: string;
   lastEventAt?: string;
+  avatar?: AgentAvatar;
 }
 
 export interface ToolSpec {

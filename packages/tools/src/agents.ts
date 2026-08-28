@@ -47,6 +47,18 @@ function errorResult(err: unknown): ToolResult {
   };
 }
 
+function isAvatarObject(value: unknown): value is {
+  character: string;
+  color: string;
+} {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as { character?: unknown; color?: unknown };
+  return (
+    typeof candidate.character === 'string' &&
+    typeof candidate.color === 'string'
+  );
+}
+
 function compactAgent(agent: AgentListItem): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: agent.id,
@@ -191,6 +203,13 @@ export const agentUpdate: Tool = {
         model: { type: 'string' },
         workspace: { type: 'string' },
         sandboxed: { type: 'boolean' },
+        avatar: {
+          type: 'object',
+          properties: {
+            character: { type: 'string' },
+            color: { type: 'string' },
+          },
+        },
       },
       required: ['agentId'],
     },
@@ -208,12 +227,15 @@ export const agentUpdate: Tool = {
     if (typeof args.workspace === 'string' && args.workspace)
       payload.workspace = args.workspace;
     if (typeof args.sandboxed === 'boolean') payload.sandboxed = args.sandboxed;
+    if (isAvatarObject(args.avatar)) {
+      payload.avatar = args.avatar;
+    }
 
     if (Object.keys(payload).length === 0) {
       return {
         ok: false,
         output:
-          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed',
+          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed, avatar',
       };
     }
 

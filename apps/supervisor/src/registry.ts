@@ -12,7 +12,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { AgentConfig, AgentInfo, AgentStatus } from '@agent-os/core';
+import type {
+  AgentAvatar,
+  AgentConfig,
+  AgentInfo,
+  AgentStatus,
+} from '@agent-os/core';
 import {
   ensureWorkspaceUser,
   homeDirForWorkspace,
@@ -117,6 +122,7 @@ export interface CreateAgentInput {
   role?: string | undefined;
   model?: string | undefined;
   sandboxed?: boolean | undefined;
+  avatar?: AgentAvatar | undefined;
   git?: {
     userName?: string;
     userEmail?: string;
@@ -149,6 +155,7 @@ export async function updateAgentConfig(
     model?: string | undefined;
     workspace?: string | undefined;
     sandboxed?: boolean | undefined;
+    avatar?: AgentAvatar | undefined;
   },
 ): Promise<AgentConfig | null> {
   const config = await readAgentConfig(id);
@@ -159,6 +166,7 @@ export async function updateAgentConfig(
   if (patch.role !== undefined) config.role = patch.role;
   if (patch.model !== undefined) config.model = patch.model;
   if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
+  if (patch.avatar !== undefined) config.avatar = patch.avatar;
   if (patch.workspace !== undefined) {
     const validationError = validateWorkspace(patch.workspace);
     if (validationError) {
@@ -230,6 +238,7 @@ export async function createAgent(
   if (input.role) config.role = input.role;
   if (input.model) config.model = input.model;
   if (input.sandboxed) config.sandboxed = input.sandboxed;
+  if (input.avatar) config.avatar = input.avatar;
   if (input.git) {
     config.git = {
       ...(input.git.userName ? { userName: input.git.userName } : {}),
@@ -500,6 +509,9 @@ export function toAgentInfo(
   }
   if (config.role) {
     info.role = config.role;
+  }
+  if (config.avatar) {
+    info.avatar = config.avatar;
   }
   return info;
 }

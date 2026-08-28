@@ -93,6 +93,10 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
       status: { type: 'complete', reason: 'stop' } as const,
     }),
     createdAt: new Date(),
+    // Do not concat consecutive assistant messages; each is its own bubble.
+    convertConfig: { joinStrategy: 'none' as const },
+  } as ThreadMessageLike & {
+    convertConfig: { joinStrategy: 'none' };
   };
 }
 

@@ -2,11 +2,7 @@
 
 import { PencilIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  useAgentSelection,
-  useAgentsFeed,
-  useAgentUsage,
-} from '@/components/agent-context';
+import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,6 +29,12 @@ import {
   stopAgent,
   updateAgent,
 } from '@/lib/api';
+import {
+  AGENT_AVATAR_COLORS,
+  AGENT_AVATAR_DEFAULT_COLOR,
+  AGENT_CHARACTERS,
+  type AgentAvatar,
+} from '@/lib/avatars';
 import type { AgentInfo, AgentStatus, ModelItem } from '@/lib/types';
 
 function statusColor(status: AgentStatus): string {
@@ -64,23 +66,13 @@ function truncateModel(model: string): string {
   return parts[parts.length - 1] ?? model;
 }
 
-// Kimi-k2p7-code context window.
-const CONTEXT_WINDOW = 262144;
-
-function formatContextLeft(u: {
-  inputTokens: number;
-  outputTokens: number;
-}): string {
-  const used = u.inputTokens + u.outputTokens;
-  const left = Math.max(0, CONTEXT_WINDOW - used);
-  if (left >= 1000) return `${Math.round(left / 1000)}k ctx left`;
-  return `${left} ctx left`;
+function avatarImagePath(character: string): string {
+  return `/characters/${character}.png`;
 }
 
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
-  const { usage } = useAgentUsage();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -89,6 +81,8 @@ export function AgentsPanel() {
   const [workspace, setWorkspace] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState('');
+  const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
+  const [color, setColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -112,7 +106,11 @@ export function AgentsPanel() {
         workspace?: string;
         role?: string;
         model?: string;
-      } = { name: name.trim() };
+        avatar: AgentAvatar;
+      } = {
+        name: name.trim(),
+        avatar: { character, color },
+      };
       if (group.trim()) payload.group = group.trim();
       if (workspace.trim()) payload.workspace = workspace.trim();
       if (role.trim()) payload.role = role.trim();
@@ -125,12 +123,23 @@ export function AgentsPanel() {
       setWorkspace('');
       setRole('');
       setModel('');
+      setCharacter(AGENT_CHARACTERS[0]);
+      setColor(AGENT_AVATAR_DEFAULT_COLOR);
     } catch (err) {
       console.error(err);
     } finally {
       setCreating(false);
     }
-  }, [name, group, workspace, role, model, setSelectedAgentId]);
+  }, [
+    name,
+    group,
+    workspace,
+    role,
+    model,
+    character,
+    color,
+    setSelectedAgentId,
+  ]);
 
   const toggleStartStop = useCallback(async (agent: AgentInfo) => {
     try {
@@ -302,6 +311,52 @@ export function AgentsPanel() {
                 allowManual={models.length === 0}
                 placeholder="Default"
               />
+              <div>
+                <label className="mb-1.5 block text-xs text-zinc-400">
+                  Character
+                </label>
+                <div className="grid grid-cols-5 gap-2">
+                  {AGENT_CHARACTERS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCharacter(c)}
+                      className={`rounded-xl p-1.5 transition-all ${
+                        character === c
+                          ? 'ring-2 ring-zinc-400'
+                          : 'hover:bg-white/5'
+                      }`}
+                      style={{ backgroundColor: color }}
+                      aria-label={`Select character ${c}`}
+                    >
+                      <img
+                        src={avatarImagePath(c)}
+                        alt=""
+                        className="size-full object-contain"
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs text-zinc-400">
+                  Color
+                </label>
+                <div className="flex gap-2">
+                  {AGENT_AVATAR_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setColor(c)}
+                      className={`size-6 rounded-md ${
+                        color === c ? 'ring-2 ring-white' : ''
+                      }`}
+                      style={{ backgroundColor: c }}
+                      aria-label={`Select color ${c}`}
+                    />
+                  ))}
+                </div>
+              </div>
               <Button
                 onClick={onCreate}
                 disabled={!name.trim() || creating}
@@ -339,11 +394,23 @@ export function AgentsPanel() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full ${statusColor(
-                          agent.status,
-                        )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
-                      />
+                      {agent.avatar ? (
+                        <div
+                          className="relative size-10 shrink-0 rounded-xl overflow-hidden"
+                          style={{ backgroundColor: agent.avatar.color }}
+                        >
+                          <img
+                            src={avatarImagePath(agent.avatar.character)}
+                            alt=""
+                            className="size-full object-contain p-1"
+                          />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-zinc-900 ${statusColor(
+                              agent.status,
+                            )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
+                          />
+                        </div>
+                      ) : null}
                       <span className="truncate text-sm font-medium text-zinc-200">
                         {agent.name}
                       </span>
@@ -363,11 +430,6 @@ export function AgentsPanel() {
                     <span className="font-mono">
                       {truncateModel(agent.model)}
                     </span>
-                    {usage[agent.id] && (
-                      <span className="font-mono text-zinc-600">
-                        {formatContextLeft(usage[agent.id]!)}
-                      </span>
-                    )}
                   </div>
                   {agent.currentTaskId && (
                     <div className="mt-1 text-xs text-zinc-500">

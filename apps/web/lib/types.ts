@@ -6,6 +6,11 @@ export type AgentStatus =
   | 'error'
   | 'stopped';
 
+export interface AgentAvatar {
+  character: string;
+  color: string;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -17,6 +22,7 @@ export interface AgentInfo {
   tmuxSession: string;
   currentTaskId?: string;
   lastEventAt?: string;
+  avatar?: AgentAvatar;
 }
 
 export interface OnboardingStatus {
@@ -49,6 +55,7 @@ export interface CreateAgentPayload {
   workspace?: string;
   role?: string;
   model?: string;
+  avatar?: AgentAvatar;
 }
 
 export interface UpdateAgentPayload {
@@ -58,4 +65,5 @@ export interface UpdateAgentPayload {
   role?: string;
   model?: string;
   sandboxed?: boolean;
+  avatar?: AgentAvatar;
 }
