@@ -79,6 +79,115 @@ function avatarTileBackground(color: string): string {
   return `linear-gradient(135deg, rgb(${r}, ${g}, ${b}) 0%, ${color} 65%)`;
 }
 
+function AgentForm({
+  name,
+  group,
+  workspace,
+  role,
+  model,
+  character,
+  color,
+  onName,
+  onGroup,
+  onWorkspace,
+  onRole,
+  onModel,
+  onCharacter,
+  onColor,
+  models,
+  loadingModels,
+  submitLabel,
+  onSubmit,
+  submitting,
+  submitDisabled,
+  error,
+}: {
+  name: string;
+  group: string;
+  workspace: string;
+  role: string;
+  model: string;
+  character: string;
+  color: string;
+  onName: (v: string) => void;
+  onGroup: (v: string) => void;
+  onWorkspace: (v: string) => void;
+  onRole: (v: string) => void;
+  onModel: (v: string) => void;
+  onCharacter: (v: string) => void;
+  onColor: (v: string) => void;
+  models: ModelItem[];
+  loadingModels: boolean;
+  submitLabel: string;
+  onSubmit: () => void;
+  submitting: boolean;
+  submitDisabled: boolean;
+  error?: string;
+}) {
+  return (
+    <div className="space-y-3 overflow-y-auto py-2 pr-1">
+      <div>
+        <label className="mb-1 block text-xs text-zinc-400">Name</label>
+        <Input
+          value={name}
+          onChange={(e) => onName(e.target.value)}
+          placeholder="research-agent"
+          className="border-zinc-800 bg-zinc-950 text-zinc-100"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-zinc-400">Group</label>
+        <Input
+          value={group}
+          onChange={(e) => onGroup(e.target.value)}
+          placeholder="research"
+          className="border-zinc-800 bg-zinc-950 text-zinc-100"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-zinc-400">Workspace</label>
+        <Input
+          value={workspace}
+          onChange={(e) => onWorkspace(e.target.value)}
+          placeholder="solo"
+          className="border-zinc-800 bg-zinc-950 text-zinc-100"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-zinc-400">Role</label>
+        <Input
+          value={role}
+          onChange={(e) => onRole(e.target.value)}
+          placeholder="planner"
+          className="border-zinc-800 bg-zinc-950 text-zinc-100"
+        />
+      </div>
+      <ModelPickerModal
+        models={models}
+        value={model}
+        onChange={onModel}
+        loading={loadingModels}
+        allowManual={models.length === 0}
+        placeholder="Default"
+      />
+      <AvatarPicker
+        character={character}
+        color={color}
+        onCharacter={onCharacter}
+        onColor={onColor}
+      />
+      {error && <div className="text-xs text-destructive">{error}</div>}
+      <Button
+        onClick={onSubmit}
+        disabled={submitDisabled || submitting}
+        className="w-full"
+      >
+        {submitting ? 'Saving...' : submitLabel}
+      </Button>
+    </div>
+  );
+}
+
 function AvatarPicker({
   character,
   color,
@@ -337,74 +446,28 @@ export function AgentsPanel() {
             <DialogHeader>
               <DialogTitle>New agent</DialogTitle>
             </DialogHeader>
-            <div className="space-y-3 overflow-y-auto py-2 pr-1">
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">Name</label>
-                <Input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="research-agent"
-                  className="border-zinc-800 bg-zinc-950 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">
-                  Group
-                </label>
-                <Input
-                  value={group}
-                  onChange={(e) => setGroup(e.target.value)}
-                  placeholder="research"
-                  className="border-zinc-800 bg-zinc-950 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">
-                  Workspace
-                </label>
-                <Input
-                  value={workspace}
-                  onChange={(e) => setWorkspace(e.target.value)}
-                  placeholder="solo"
-                  className="border-zinc-800 bg-zinc-950 text-zinc-100"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">Role</label>
-                <Input
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  placeholder="planner"
-                  className="border-zinc-800 bg-zinc-950 text-zinc-100"
-                />
-              </div>
-              <ModelPickerModal
-                models={models}
-                value={model}
-                onChange={setModel}
-                loading={loadingModels}
-                allowManual={models.length === 0}
-                placeholder="Default"
-              />
-              <div>
-                <label className="mb-1.5 block text-xs text-zinc-400">
-                  Character
-                </label>
-                <AvatarPicker
-                  character={character}
-                  color={color}
-                  onCharacter={setCharacter}
-                  onColor={setColor}
-                />
-              </div>
-              <Button
-                onClick={onCreate}
-                disabled={!name.trim() || creating}
-                className="w-full"
-              >
-                {creating ? 'Creating...' : 'Create agent'}
-              </Button>
-            </div>
+            <AgentForm
+              name={name}
+              group={group}
+              workspace={workspace}
+              role={role}
+              model={model}
+              character={character}
+              color={color}
+              onName={setName}
+              onGroup={setGroup}
+              onWorkspace={setWorkspace}
+              onRole={setRole}
+              onModel={setModel}
+              onCharacter={setCharacter}
+              onColor={setColor}
+              models={models}
+              loadingModels={loadingModels}
+              submitLabel="Create agent"
+              onSubmit={onCreate}
+              submitting={creating}
+              submitDisabled={!name.trim()}
+            />
           </DialogContent>
         </Dialog>
       </div>
@@ -558,66 +621,29 @@ export function AgentsPanel() {
               Update the agent's configuration. Changes apply immediately.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 overflow-y-auto py-2 pr-1">
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">Name</label>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="research-agent"
-                className="border-zinc-800 bg-zinc-950 text-zinc-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">Group</label>
-              <Input
-                value={editGroup}
-                onChange={(e) => setEditGroup(e.target.value)}
-                placeholder="research"
-                className="border-zinc-800 bg-zinc-950 text-zinc-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">
-                Workspace
-              </label>
-              <Input
-                value={editWorkspace}
-                onChange={(e) => setEditWorkspace(e.target.value)}
-                placeholder="solo"
-                className="border-zinc-800 bg-zinc-950 text-zinc-100"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-zinc-400">Role</label>
-              <Input
-                value={editRole}
-                onChange={(e) => setEditRole(e.target.value)}
-                placeholder="planner"
-                className="border-zinc-800 bg-zinc-950 text-zinc-100"
-              />
-            </div>
-            <ModelPickerModal
-              models={models}
-              value={editModel}
-              onChange={setEditModel}
-              loading={loadingModels}
-              allowManual={models.length === 0}
-              placeholder="Default"
-            />
-            <AvatarPicker
-              character={editCharacter}
-              color={editColor}
-              onCharacter={setEditCharacter}
-              onColor={setEditColor}
-            />
-            {editError && (
-              <div className="text-xs text-destructive">{editError}</div>
-            )}
-            <Button onClick={confirmEdit} disabled={saving} className="w-full">
-              {saving ? 'Saving...' : 'Save changes'}
-            </Button>
-          </div>
+          <AgentForm
+            name={editName}
+            group={editGroup}
+            workspace={editWorkspace}
+            role={editRole}
+            model={editModel}
+            character={editCharacter}
+            color={editColor}
+            onName={setEditName}
+            onGroup={setEditGroup}
+            onWorkspace={setEditWorkspace}
+            onRole={setEditRole}
+            onModel={setEditModel}
+            onCharacter={setEditCharacter}
+            onColor={setEditColor}
+            models={models}
+            loadingModels={loadingModels}
+            submitLabel="Save changes"
+            onSubmit={confirmEdit}
+            submitting={saving}
+            submitDisabled={false}
+            error={editError}
+          />
         </DialogContent>
       </Dialog>
     </div>
