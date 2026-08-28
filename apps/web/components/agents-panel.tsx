@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
+import {
+  useAgentSelection,
+  useAgentsFeed,
+  useLivePreview,
+} from '@/components/agent-context';
+import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,7 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { createAgent, getModels, startAgent, stopAgent } from '@/lib/api';
-import type { AgentInfo, AgentStatus } from '@/lib/types';
+import type { AgentInfo, AgentStatus, ModelItem } from '@/lib/types';
 
 function statusColor(status: AgentStatus): string {
   switch (status) {
@@ -46,9 +51,8 @@ function truncateModel(model: string): string {
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
-  const [models, setModels] = useState<
-    { id: string; supportsTools: boolean }[]
-  >([]);
+  const { livePreview } = useLivePreview();
+  const [models, setModels] = useState<ModelItem[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
@@ -172,36 +176,14 @@ export function AgentsPanel() {
                   className="border-zinc-800 bg-zinc-950 text-zinc-100"
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">
-                  Model
-                </label>
-                {loadingModels ? (
-                  <div className="h-9 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">
-                    Loading models...
-                  </div>
-                ) : models.length > 0 ? (
-                  <select
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-600"
-                  >
-                    <option value="">Default</option>
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.id}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="model-id"
-                    className="border-zinc-800 bg-zinc-950 text-zinc-100"
-                  />
-                )}
-              </div>
+              <ModelPickerModal
+                models={models}
+                value={model}
+                onChange={setModel}
+                loading={loadingModels}
+                allowManual={models.length === 0}
+                placeholder="Default"
+              />
               <Button
                 onClick={onCreate}
                 disabled={!name.trim() || creating}
@@ -241,6 +223,11 @@ export function AgentsPanel() {
                     <span className="truncate text-sm font-medium text-zinc-200">
                       {agent.name}
                     </span>
+                    {livePreview[agent.id] && (
+                      <span className="truncate text-xs italic text-zinc-500 opacity-70">
+                        {livePreview[agent.id]}
+                      </span>
+                    )}
                   </div>
                   <Button
                     variant="ghost"

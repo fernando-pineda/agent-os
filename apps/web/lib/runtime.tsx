@@ -6,6 +6,7 @@ import {
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { useLivePreview } from '@/components/agent-context';
 import { getMessages } from '@/lib/api';
 
 export type RuntimeProviderProps = {
@@ -98,6 +99,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const { setLivePreview, clearLivePreview } = useLivePreview();
 
   useEffect(() => {
     let cancelled = false;
@@ -165,17 +167,20 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       };
 
       try {
-        const res = await fetch(`/backend/api/agents/${agentId}/chat`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            messages: nextMessages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              parts: [{ type: 'text', text: m.text }],
-            })),
-          }),
-        });
+        const res = await fetch(
+          `http://localhost:8787/api/agents/${agentId}/chat`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              messages: nextMessages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                parts: [{ type: 'text', text: m.text }],
+              })),
+            }),
+          },
+        );
         if (!res.ok || !res.body) {
           throw new Error(`chat failed: ${res.status}`);
         }
@@ -193,6 +198,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
             if (line.startsWith('0:')) {
               assistantMsg.text += JSON.parse(line.slice(2)) as string;
               pushAssistant();
+              setLivePreview(agentId, assistantMsg.text.slice(-120));
             } else if (line.startsWith('b:')) {
               const d = JSON.parse(line.slice(2)) as {
                 toolCallId: string;
@@ -206,6 +212,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 argsText: '',
               });
               pushAssistant();
+              setLivePreview(agentId, `Running ${d.toolName}...`);
             } else if (line.startsWith('c:')) {
               const d = JSON.parse(line.slice(2)) as {
                 toolCallId: string;
@@ -236,6 +243,8 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                     : JSON.stringify(d.result);
                 tp.isError = Boolean(d.isError);
                 pushAssistant();
+                const out = (tp.result ?? '').slice(0, 100);
+                setLivePreview(agentId, out ? `→ ${out}` : 'Done');
               }
             }
           }
@@ -245,9 +254,10 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
         pushAssistant();
       } finally {
         setIsRunning(false);
+        clearLivePreview(agentId);
       }
     },
-    [agentId, messages],
+    [agentId, messages, setLivePreview, clearLivePreview],
   );
 
   const runtime = useExternalStoreRuntime({

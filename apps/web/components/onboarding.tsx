@@ -1,16 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getModels, postOnboarding } from '@/lib/api';
+import type { ModelItem } from '@/lib/types';
 
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
-  const [models, setModels] = useState<
-    { id: string; supportsTools: boolean }[]
-  >([]);
+  const [models, setModels] = useState<ModelItem[]>([]);
   const [modelError, setModelError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,32 +101,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             </p>
           )}
 
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-zinc-400">
-              Default model
-            </label>
-            {models.length > 0 ? (
-              <select
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:ring-1 focus:ring-zinc-600"
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                    {m.supportsTools ? ' (tools)' : ''}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <Input
-                value={defaultModel}
-                onChange={(e) => setDefaultModel(e.target.value)}
-                placeholder="accounts/fireworks/models/llama-v3-8b-instruct"
-                className="border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600"
-              />
-            )}
-          </div>
+          <ModelPickerModal
+            models={models}
+            value={defaultModel}
+            onChange={setDefaultModel}
+            loading={loading && models.length === 0}
+            allowManual={modelError || models.length === 0}
+            placeholder="Select a model"
+          />
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
