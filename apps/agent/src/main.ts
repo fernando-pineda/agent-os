@@ -154,6 +154,8 @@ function buildEnv(agent: AgentConfig): Record<string, string> {
   return env;
 }
 
+// agent.plugins holds MCP server names, not built-in tool names; it never
+// filters the built-in set. MCP runtime wiring is not implemented yet.
 function buildTools(
   sandboxed: boolean,
   homeDir: string,
@@ -161,14 +163,10 @@ function buildTools(
   agent: AgentConfig,
 ): Tool[] {
   const base = defaultTools();
-  const enabled = agent.plugins;
-  const filtered = enabled
-    ? base.filter((t) => enabled.includes(t.spec.name))
-    : base;
   if (!sandboxed) {
-    return filtered;
+    return base;
   }
-  return filtered.map((tool) => {
+  return base.map((tool) => {
     if (tool.spec.name === 'shell') {
       return wrapWithSandbox(tool, 'agentShell', { workspace, homeDir });
     }

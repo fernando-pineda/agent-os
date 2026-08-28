@@ -65,6 +65,7 @@ export async function onboard(input: OnboardingInput): Promise<void> {
 export async function updateGlobalConfig(patch: {
   apiKey?: string;
   defaultModel?: string;
+  reminders?: string[];
 }): Promise<GlobalConfig> {
   const current = await readGlobalConfig();
   if (!current) {
@@ -75,6 +76,9 @@ export async function updateGlobalConfig(patch: {
   }
   if (patch.defaultModel !== undefined) {
     current.defaultModel = patch.defaultModel;
+  }
+  if (patch.reminders !== undefined) {
+    current.reminders = patch.reminders;
   }
   await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
   await writeFile(configPath, JSON.stringify(current, null, 2), {

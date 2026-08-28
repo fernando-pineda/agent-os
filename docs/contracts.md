@@ -24,6 +24,18 @@ interface GlobalConfig {
   apiKey: string;
   defaultModel: string;
   createdAt: string; // ISO 8601
+  mcpServers?: McpServerConfig[]; // configured MCP servers (global)
+  reminders?: string[]; // short texts injected into every agent turn
+}
+
+interface McpServerConfig {
+  name: string;
+  transport: "stdio" | "http";
+  command?: string;   // stdio
+  args?: string[];    // stdio
+  env?: Record<string, string>; // stdio
+  url?: string;       // http
+  headers?: Record<string, string>; // http
 }
 ```
 
@@ -44,7 +56,8 @@ interface AgentConfig {
     sshKeyPath?: string;   // key in the agent user's ~/.ssh, referenced from its ssh config
   };
   sandboxed?: boolean;   // wrap task shell commands in sandbox-exec profile
-  plugins?: string[];    // enabled tool names; absent/undefined = all enabled
+  plugins?: string[];    // enabled MCP server names; absent/undefined = all enabled
+  reminders?: string[]; // per-agent reminders, applied on restart
   createdAt: string;
 }
 ```
@@ -68,12 +81,13 @@ interface AgentInfo {
   group?: string;
   workspace: string;   // resolved (own id when solo)
   role?: string;
+  reminders?: string[]; // per-agent silent reminders, injected into every turn
   status: AgentStatus;
   model: string;       // resolved model (agent override or default)
   tmuxSession: string; // e.g. "agent-os-<id>"
   currentTaskId?: string;
   lastEventAt?: string;
-  plugins?: string[];    // enabled tool names; absent/undefined = all enabled
+  plugins?: string[];    // enabled MCP server names; absent/undefined = all enabled
 }
 ```
 
@@ -220,13 +234,16 @@ type AgentCommand = { type: "cancel"; taskId: string };
 
 - `GET /api/onboarding/status` -> `{ configured: boolean }`
 - `POST /api/onboarding` body `{ provider: "fireworks", apiKey: string, defaultModel: string }` -> writes `~/.agent-os/config.json`, returns `{ ok: true }`
-- `GET /api/config` -> `{ provider: "fireworks", apiKey: string (masked, last 4 chars), defaultModel: string }` (404 `{ error: "not configured" }` if no config)
-- `PATCH /api/config` body `{ apiKey?: string, defaultModel?: string }` -> updates config (apiKey only overwritten when non-empty), returns masked config same as GET
-- `GET /api/plugins` -> `{ plugins: { name: string, description: string }[] }` catalog of built-in tools
+- `GET /api/config` -> `{ provider: "fireworks", apiKey: string (masked, last 4 chars), defaultModel: string, reminders?: string[] }` (404 `{ error: "not configured" }` if no config)
+- `PATCH /api/config` body `{ apiKey?: string, defaultModel?: string, reminders?: string[] }` -> updates config (apiKey only overwritten when non-empty; reminders undefined means unchanged, [] clears), returns masked config same as GET
+- `GET /api/mcp` -> `{ servers: McpServerConfig[] }` (empty array if none)
+- `POST /api/mcp` body `McpServerConfig` -> validates, rejects duplicate name with 409, persists to `~/.agent-os/config.json`, returns 201 with the created server
+- `PATCH /api/mcp/:name` body `Partial<McpServerConfig>` -> updates fields, rename allowed if new name not taken, 404 if not found, returns updated server
+- `DELETE /api/mcp/:name` -> removes server, 404 if not found, returns `{ ok: true }`
 - `GET /api/models` -> `{ models: { id: string; supportsTools: boolean }[] }` proxied from Fireworks, cached 5 min
 - `GET /api/agents` -> `{ agents: AgentInfo[] }`
-- `POST /api/agents` body `{ name: string; group?: string; model?: string }` -> creates agent (home dir, config, tmux session, process), returns `AgentInfo`
-- `PATCH /api/agents/{id}` body `{ name?; group?; role?; instructions?; model?; workspace?; sandboxed?; avatar?; plugins?: string[] }` -> updates config (plugins validated against GET /api/plugins names), returns updated `AgentConfig`
+- `POST /api/agents` body `{ name: string; group?: string; model?: string; avatar?: { character: string; color: string }; plugins?: string[]; reminders?: string[] }` -> creates agent (home dir, config, tmux session, process), returns `AgentInfo`. Avatar is always set: if omitted or invalid the server assigns a default (first character, zinc color); an explicitly invalid avatar returns 400
+- `PATCH /api/agents/{id}` body `{ name?; group?; role?; instructions?; model?; workspace?; sandboxed?; avatar?; plugins?: string[]; reminders?: string[] }` -> updates config (plugins validated against GET /api/mcp server names, unknown names return 400; reminders undefined means unchanged, [] clears), returns updated `AgentConfig`
 - `POST /api/agents/{id}/stop` and `POST /api/agents/{id}/start`
 - `GET /api/agents/events` SSE stream of `AgentInfo` snapshots (sidebar)
 - `POST /api/agents/{id}/chat` proxy to the agent AI SDK endpoint (streams through)

@@ -3,6 +3,24 @@ export interface GlobalConfig {
   apiKey: string;
   defaultModel: string;
   createdAt: string;
+  mcpServers?: McpServerConfig[];
+  reminders?: string[];
+}
+
+export interface McpServerConfig {
+  name: string;
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export type McpStatus = 'online' | 'offline' | 'unknown';
+
+export interface McpStatusResponse {
+  statuses: Record<string, McpStatus>;
 }
 
 export interface AgentAvatar {
@@ -27,6 +45,7 @@ export interface AgentConfig {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  reminders?: string[];
   createdAt: string;
 }
 
@@ -52,6 +71,7 @@ export interface AgentInfo {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  reminders?: string[];
 }
 
 export interface ToolSpec {
@@ -105,6 +125,7 @@ export interface ToolContext {
   agentId: string;
   workspace: string;
   homeDir: string;
+  group?: string | undefined;
   signal?: AbortSignal | undefined;
   env?: Record<string, string> | undefined;
   sendAgentMessage?: (toAgentId: string, message: string) => Promise<string>;

@@ -1,4 +1,4 @@
-import type { Tool, ToolResult } from '@agent-os/core';
+import type { Tool, ToolContext, ToolResult } from '@agent-os/core';
 
 const SUPERVISOR_BASE = 'http://localhost:8787';
 
@@ -10,6 +10,8 @@ interface AgentListItem {
   group?: string;
   role?: string;
   workspace?: string;
+  instructions?: string;
+  plugins?: string[];
 }
 
 function isAgentListResponse(value: unknown): value is { agents: unknown[] } {
@@ -69,20 +71,26 @@ function compactAgent(agent: AgentListItem): Record<string, unknown> {
   if (agent.group !== undefined) out.group = agent.group;
   if (agent.role !== undefined) out.role = agent.role;
   if (agent.workspace !== undefined) out.workspace = agent.workspace;
+  if (agent.instructions !== undefined) out.instructions = agent.instructions;
+  if (agent.plugins !== undefined) out.plugins = agent.plugins;
   return out;
 }
 
 export const agentList: Tool = {
   spec: {
     name: 'agent_list',
-    description: 'List all agents managed by the supervisor',
+    description:
+      'List agents you can contact. If you belong to a group, only that group is listed. If you are not in a group, all agents across all groups are listed, each tagged with its group. Each entry includes name, status, model, role, instructions (what it does) and plugins, so you can decide whether to call it.',
     parameters: {
       type: 'object',
       properties: {},
     },
   },
 
-  async execute(_args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(
+    _args: Record<string, unknown>,
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
     try {
       const res = await fetch(`${SUPERVISOR_BASE}/api/agents`);
       const body = await res.text();
@@ -100,15 +108,33 @@ export const agentList: Tool = {
         };
       }
 
-      const list = isAgentListResponse(data)
+      let list = isAgentListResponse(data)
         ? data.agents.filter(isAgentObject)
         : Array.isArray(data)
           ? data.filter(isAgentObject)
           : [];
-      return {
-        ok: true,
-        output: JSON.stringify(list.map(compactAgent), null, 2),
-      };
+
+      // Group scoping: a grouped agent sees only its own group; an ungrouped
+      // agent sees every group (group name is included per entry).
+      let groupNote: string | undefined;
+      if (ctx.group) {
+        list = list.filter((a) => a.group === ctx.group);
+        groupNote = `You only see agents in your group "${ctx.group}".`;
+      } else {
+        const groups = [
+          ...new Set(
+            list.map((a) => a.group).filter((g): g is string => Boolean(g)),
+          ),
+        ];
+        if (groups.length > 0) {
+          groupNote = `Groups present: ${groups.join(', ')}. You are not in a group, so you see all of them.`;
+        }
+      }
+
+      const output = groupNote
+        ? `${groupNote}\n${JSON.stringify(list.map(compactAgent), null, 2)}`
+        : JSON.stringify(list.map(compactAgent), null, 2);
+      return { ok: true, output };
     } catch (err) {
       return errorResult(err);
     }
@@ -127,6 +153,12 @@ export const agentCreate: Tool = {
         workspace: { type: 'string' },
         role: { type: 'string' },
         model: { type: 'string' },
+        plugins: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Names of MCP servers to activate for the new agent (from mcp_list)',
+        },
         avatar: {
           type: 'object',
           properties: {
@@ -135,7 +167,7 @@ export const agentCreate: Tool = {
           },
         },
       },
-      required: ['name'],
+      required: ['name', 'avatar'],
     },
   },
 
@@ -150,6 +182,11 @@ export const agentCreate: Tool = {
     if (typeof args.role === 'string' && args.role) payload.role = args.role;
     if (typeof args.model === 'string' && args.model)
       payload.model = args.model;
+    if (
+      Array.isArray(args.plugins) &&
+      args.plugins.every((p) => typeof p === 'string')
+    )
+      payload.plugins = args.plugins;
     if (isAvatarObject(args.avatar)) {
       payload.avatar = args.avatar;
     }
@@ -213,6 +250,12 @@ export const agentUpdate: Tool = {
         model: { type: 'string' },
         workspace: { type: 'string' },
         sandboxed: { type: 'boolean' },
+        plugins: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            "Replace the agent's active MCP servers (from mcp_list). Empty array clears all.",
+        },
         avatar: {
           type: 'object',
           properties: {
@@ -237,6 +280,11 @@ export const agentUpdate: Tool = {
     if (typeof args.workspace === 'string' && args.workspace)
       payload.workspace = args.workspace;
     if (typeof args.sandboxed === 'boolean') payload.sandboxed = args.sandboxed;
+    if (
+      Array.isArray(args.plugins) &&
+      args.plugins.every((p) => typeof p === 'string')
+    )
+      payload.plugins = args.plugins;
     if (isAvatarObject(args.avatar)) {
       payload.avatar = args.avatar;
     }
@@ -245,7 +293,7 @@ export const agentUpdate: Tool = {
       return {
         ok: false,
         output:
-          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed, avatar',
+          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed, avatar, plugins',
       };
     }
 

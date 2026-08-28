@@ -14,8 +14,10 @@ import {
   useGroupsFeed,
 } from '@/components/agent-context';
 import { ModelPickerModal } from '@/components/model-picker-modal';
+import { RemindersEditor } from '@/components/reminders-editor';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -45,6 +47,7 @@ import {
   createGroup,
   deleteAgent,
   deleteGroup,
+  getMcpServers,
   getModels,
   startAgent,
   stopAgent,
@@ -58,7 +61,12 @@ import {
   avatarImagePath,
   avatarTileBackground,
 } from '@/lib/avatars';
-import type { AgentInfo, AgentStatus, ModelItem } from '@/lib/types';
+import type {
+  AgentInfo,
+  AgentStatus,
+  McpServerConfig,
+  ModelItem,
+} from '@/lib/types';
 
 function statusColor(status: AgentStatus): string {
   switch (status) {
@@ -89,6 +97,12 @@ function truncateModel(model: string): string {
   return parts[parts.length - 1] ?? model;
 }
 
+function mcpDescriptor(server: McpServerConfig): string {
+  if (server.transport === 'http') return server.url ?? '';
+  const parts = [server.command ?? '', ...(server.args ?? [])];
+  return parts.join(' ');
+}
+
 function AgentForm({
   name,
   role,
@@ -104,6 +118,12 @@ function AgentForm({
   onInstructions,
   models,
   loadingModels,
+  mcpServers,
+  mcpLoading,
+  selectedPlugins,
+  onTogglePlugin,
+  reminders,
+  onReminders,
   submitLabel,
   onSubmit,
   submitting,
@@ -124,6 +144,12 @@ function AgentForm({
   onInstructions: (v: string) => void;
   models: ModelItem[];
   loadingModels: boolean;
+  mcpServers: McpServerConfig[];
+  mcpLoading: boolean;
+  selectedPlugins: string[];
+  onTogglePlugin: (name: string, checked: boolean) => void;
+  reminders: string[];
+  onReminders: (next: string[]) => void;
   submitLabel: string;
   onSubmit: () => void;
   submitting: boolean;
@@ -136,6 +162,8 @@ function AgentForm({
         <TabsTab value="general">General</TabsTab>
         <TabsTab value="instructions">Instructions & roles</TabsTab>
         <TabsTab value="automations">Automations</TabsTab>
+        <TabsTab value="plugins">Active plugins</TabsTab>
+        <TabsTab value="reminders">Reminders</TabsTab>
         <TabsIndicator />
       </TabsList>
       <TabsPanel value="general">
@@ -193,6 +221,57 @@ function AgentForm({
       <TabsPanel value="automations">
         <div className="py-6 text-center text-xs text-zinc-500">
           Automations are not available yet.
+        </div>
+      </TabsPanel>
+      <TabsPanel value="plugins">
+        {mcpLoading ? (
+          <div className="py-6 text-center text-xs text-zinc-500">
+            Loading...
+          </div>
+        ) : mcpServers.length === 0 ? (
+          <div className="py-6 text-center text-sm text-zinc-500">
+            No plugins configured. Add them in Settings.
+          </div>
+        ) : (
+          <div className="max-h-[40vh] space-y-1 overflow-y-auto py-2 pr-1">
+            {mcpServers.map((server) => (
+              <label
+                key={server.name}
+                className="flex items-start justify-between gap-3 rounded-md px-2 py-2 hover:bg-zinc-800/40"
+              >
+                <div className="flex items-start gap-2.5">
+                  <Checkbox
+                    checked={selectedPlugins.includes(server.name)}
+                    onCheckedChange={(checked) =>
+                      onTogglePlugin(server.name, checked)
+                    }
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="font-mono text-xs text-zinc-300">
+                      {server.name}
+                    </div>
+                    <div className="truncate text-xs text-zinc-500">
+                      {mcpDescriptor(server)}
+                    </div>
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+      </TabsPanel>
+      <TabsPanel value="reminders">
+        <div className="space-y-3 py-2">
+          <p className="text-xs text-zinc-500">
+            Short texts injected into every agent turn. Agents consider them
+            silently.
+          </p>
+          <RemindersEditor
+            value={reminders}
+            onChange={onReminders}
+            idPrefix="agent-reminders"
+          />
         </div>
       </TabsPanel>
       {error && (
@@ -456,9 +535,13 @@ export function AgentsPanel() {
   const [role, setRole] = useState('');
   const [model, setModel] = useState('');
   const [instructions, setInstructions] = useState('');
+  const [reminders, setReminders] = useState<string[]>([]);
   const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
   const [color, setColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
   const [creating, setCreating] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -476,6 +559,36 @@ export function AgentsPanel() {
       .finally(() => setLoadingModels(false));
   }, [model]);
 
+  const refreshMcpServers = useCallback(async () => {
+    setMcpLoading(true);
+    try {
+      const list = await getMcpServers();
+      setMcpServers(list);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setMcpLoading(false);
+    }
+  }, []);
+
+  const onTogglePlugin = useCallback((pluginName: string, checked: boolean) => {
+    setSelectedPlugins((prev) =>
+      checked
+        ? prev.includes(pluginName)
+          ? prev
+          : [...prev, pluginName]
+        : prev.filter((p) => p !== pluginName),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (dialogOpen) {
+      setSelectedPlugins([]);
+      setReminders([]);
+      void refreshMcpServers();
+    }
+  }, [dialogOpen, refreshMcpServers]);
+
   const onCreate = useCallback(async () => {
     if (!name.trim()) return;
     setCreating(true);
@@ -485,14 +598,18 @@ export function AgentsPanel() {
         role?: string;
         model?: string;
         instructions?: string;
+        reminders?: string[];
         avatar: AgentAvatar;
+        plugins: string[];
       } = {
         name: name.trim(),
         avatar: { character, color },
+        plugins: selectedPlugins,
       };
       if (role.trim()) payload.role = role.trim();
       if (model.trim()) payload.model = model.trim();
       if (instructions.trim()) payload.instructions = instructions.trim();
+      if (reminders.length > 0) payload.reminders = reminders;
       const agent = await createAgent(payload);
       setSelectedAgentId(agent.id);
       setDialogOpen(false);
@@ -500,14 +617,26 @@ export function AgentsPanel() {
       setRole('');
       setModel('');
       setInstructions('');
+      setReminders([]);
       setCharacter(AGENT_CHARACTERS[0]);
       setColor(AGENT_AVATAR_DEFAULT_COLOR);
+      setSelectedPlugins([]);
     } catch (err) {
       console.error(err);
     } finally {
       setCreating(false);
     }
-  }, [name, role, model, instructions, character, color, setSelectedAgentId]);
+  }, [
+    name,
+    role,
+    model,
+    instructions,
+    character,
+    color,
+    selectedPlugins,
+    reminders,
+    setSelectedAgentId,
+  ]);
 
   const onCreateGroup = useCallback(async () => {
     const trimmed = groupName.trim();
@@ -604,6 +733,7 @@ export function AgentsPanel() {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
   const [editInstructions, setEditInstructions] = useState('');
+  const [editReminders, setEditReminders] = useState<string[]>([]);
   const [editModel, setEditModel] = useState('');
   const [editCharacter, setEditCharacter] = useState<string>(
     AGENT_CHARACTERS[0],
@@ -612,16 +742,22 @@ export function AgentsPanel() {
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
-  const openEditDialog = useCallback((agent: AgentInfo) => {
-    setEditDialog(agent);
-    setEditName(agent.name);
-    setEditRole(agent.role ?? '');
-    setEditInstructions(agent.instructions ?? '');
-    setEditModel(agent.model);
-    setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
-    setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
-    setEditError('');
-  }, []);
+  const openEditDialog = useCallback(
+    (agent: AgentInfo) => {
+      setEditDialog(agent);
+      setEditName(agent.name);
+      setEditRole(agent.role ?? '');
+      setEditInstructions(agent.instructions ?? '');
+      setEditReminders(agent.reminders ?? []);
+      setEditModel(agent.model);
+      setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
+      setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
+      setSelectedPlugins(agent.plugins ?? []);
+      setEditError('');
+      void refreshMcpServers();
+    },
+    [refreshMcpServers],
+  );
 
   const closeEditDialog = useCallback(() => {
     setEditDialog(null);
@@ -639,8 +775,11 @@ export function AgentsPanel() {
         model: editModel.trim() || undefined,
         instructions: editInstructions.trim() || undefined,
         avatar: { character: editCharacter, color: editColor },
+        plugins: selectedPlugins,
+        reminders: editReminders,
       });
       closeEditDialog();
+      setSelectedPlugins([]);
     } catch (err) {
       setEditError(
         err instanceof Error ? err.message : 'Failed to update agent',
@@ -656,6 +795,8 @@ export function AgentsPanel() {
     editModel,
     editCharacter,
     editColor,
+    selectedPlugins,
+    editReminders,
     closeEditDialog,
   ]);
 
@@ -702,6 +843,12 @@ export function AgentsPanel() {
               onInstructions={setInstructions}
               models={models}
               loadingModels={loadingModels}
+              mcpServers={mcpServers}
+              mcpLoading={mcpLoading}
+              selectedPlugins={selectedPlugins}
+              onTogglePlugin={onTogglePlugin}
+              reminders={reminders}
+              onReminders={setReminders}
               submitLabel="Create agent"
               onSubmit={onCreate}
               submitting={creating}
@@ -854,6 +1001,12 @@ export function AgentsPanel() {
             onInstructions={setEditInstructions}
             models={models}
             loadingModels={loadingModels}
+            mcpServers={mcpServers}
+            mcpLoading={mcpLoading}
+            selectedPlugins={selectedPlugins}
+            onTogglePlugin={onTogglePlugin}
+            reminders={editReminders}
+            onReminders={setEditReminders}
             submitLabel="Save changes"
             onSubmit={confirmEdit}
             submitting={saving}

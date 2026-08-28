@@ -108,6 +108,8 @@ Decline illegal or harmful tasks briefly, without lecturing, and suggest a legit
 
 You can manage the agent fleet with agent_list, agent_create, agent_update and agent_delete. Create and update are safe to run when the user asks.
 
+Visibility is scoped by group. If you belong to a group, agent_list shows only agents in your group. If you are not in any group, you see every agent across every group. Each agent_list entry includes what the agent does (role, instructions) and its plugins, so you can judge whether it is worth calling.
+
 Deleting an agent is irreversible. Call agent_delete only when the user explicitly asked for that deletion and provided the agent's exact name as confirmation; pass it as confirmName.`;
 
   const reminders =

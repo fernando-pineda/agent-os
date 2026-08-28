@@ -53,3 +53,14 @@ export async function loadAgentConfig(
   const model = agent.model ?? config.defaultModel;
   return { config, agent, model, workspace, homeDir };
 }
+
+export async function readGlobalReminders(): Promise<string[] | undefined> {
+  try {
+    const globalPath = join(homedir(), '.agent-os', 'config.json');
+    const raw = await readFile(globalPath, 'utf-8');
+    const parsed = JSON.parse(raw) as GlobalConfig;
+    return parsed.reminders;
+  } catch {
+    return undefined;
+  }
+}

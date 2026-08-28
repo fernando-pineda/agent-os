@@ -22,6 +22,7 @@ import {
 } from 'assistant-stream';
 import type { ReadonlyJSONValue } from 'assistant-stream/utils';
 import { loadMemoryIndex } from './compact.js';
+import { readGlobalReminders } from './config.js';
 import { appendOutbox, deliverWithRetry, removeOutbox } from './outbox.js';
 import { findPortFor, myPort } from './registry.js';
 import {
@@ -262,14 +263,14 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       async (streamController: AssistantStreamController) => {
         try {
           const memoryIndex = await loadMemoryIndex(serverDeps.homeDir);
+          const globalReminders = await readGlobalReminders();
+          const reminders = [
+            ...(globalReminders ?? []),
+            ...(serverDeps.agent.reminders ?? []),
+          ];
           // Persist incrementally so a reload mid-run keeps the turn so far.
-          const persistPartial = async (): Promise<void> => {
-            try {
-              await persistTurn(messages, segments, serverDeps);
-            } catch {
-              // ignore partial write errors
-            }
-          };
+          const persistPartial = (): Promise<void> =>
+            enqueuePersist(() => persistTurn(messages, segments, serverDeps));
           await runAgentLoop({
             llm: serverDeps.llm,
             tools: serverDeps.tools,
@@ -281,6 +282,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
               ? { instructions: serverDeps.agent.instructions }
               : {}),
             ...(memoryIndex ? { memoryIndex } : {}),
+            ...(reminders.length > 0 ? { reminders } : {}),
             buildContext: serverDeps.buildContext,
             signal: controller.signal,
             onEvent: (event: LoopEvent) => {
@@ -306,7 +308,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
               }
             },
           });
-          await persistTurn(messages, segments, serverDeps);
+          await enqueuePersist(() =>
+            persistTurn(messages, segments, serverDeps),
+          );
           if (lastUsage) {
             await saveUsage(serverDeps.homeDir, lastUsage);
           }
@@ -393,6 +397,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     let text = '';
 
     try {
+      const globalReminders = await readGlobalReminders();
+      const reminders = [
+        ...(globalReminders ?? []),
+        ...(serverDeps.agent.reminders ?? []),
+      ];
       await runAgentLoop({
         llm: serverDeps.llm,
         tools: serverDeps.tools,
@@ -403,6 +412,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         ...(serverDeps.agent.instructions
           ? { instructions: serverDeps.agent.instructions }
           : {}),
+        ...(reminders.length > 0 ? { reminders } : {}),
         buildContext: serverDeps.buildContext,
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {
@@ -534,6 +544,16 @@ function handleStreamEvent(
       seg.isError = result.ok === false;
     }
   }
+}
+
+// Serializes thread.json writes per process; concurrent persistTurn calls
+// would otherwise race the temp-file rename and throw ENOENT.
+let persistQueue: Promise<void> = Promise.resolve();
+
+function enqueuePersist(task: () => Promise<void>): Promise<void> {
+  const run = persistQueue.then(task, task);
+  persistQueue = run.catch(() => {});
+  return run;
 }
 
 async function persistTurn(

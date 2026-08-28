@@ -26,6 +26,7 @@ export interface AgentInfo {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  reminders?: string[];
 }
 
 export interface OnboardingStatus {
@@ -60,6 +61,8 @@ export interface CreateAgentPayload {
   role?: string;
   model?: string;
   avatar?: AgentAvatar;
+  plugins?: string[];
+  reminders?: string[];
 }
 
 export interface UpdateAgentPayload {
@@ -72,24 +75,38 @@ export interface UpdateAgentPayload {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  reminders?: string[];
 }
 
 export interface GlobalConfigStatus {
   provider: 'fireworks';
   apiKey: string;
   defaultModel: string;
+  reminders?: string[];
 }
 
 export interface UpdateConfigPayload {
   apiKey?: string;
   defaultModel?: string;
+  reminders?: string[];
 }
 
-export interface PluginInfo {
+export interface McpServerConfig {
   name: string;
-  description: string;
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 }
 
-export interface PluginsResponse {
-  plugins: PluginInfo[];
+export interface McpServersResponse {
+  servers: McpServerConfig[];
+}
+
+export type McpStatus = 'online' | 'offline' | 'unknown';
+
+export interface McpStatusResponse {
+  statuses: Record<string, McpStatus>;
 }

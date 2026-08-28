@@ -4,9 +4,16 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { URL } from 'node:url';
-import type { AgentAvatar, AgentInfo } from '@agent-os/core';
+import type { AgentAvatar, AgentInfo, McpServerConfig } from '@agent-os/core';
 import { createGroup, deleteGroup, loadGroups } from './groups.js';
 import { installLaunchdAgent, uninstallLaunchdAgent } from './launchd.js';
+import {
+  createMcpServer,
+  deleteMcpServer,
+  listMcpServers,
+  probeMcpStatuses,
+  updateMcpServer,
+} from './mcps.js';
 import {
   isConfigured,
   listModels,
@@ -14,7 +21,6 @@ import {
   readGlobalConfig,
   updateGlobalConfig,
 } from './onboarding.js';
-import { PLUGIN_NAMES, PLUGINS } from './plugins.js';
 import type { CreateAgentInput, Registry } from './registry.js';
 import {
   createAgent,
@@ -119,6 +125,7 @@ async function handle(
         provider: config.provider,
         apiKey: maskApiKey(config.apiKey),
         defaultModel: config.defaultModel,
+        ...(config.reminders ? { reminders: config.reminders } : {}),
       }),
     );
     return;
@@ -126,10 +133,23 @@ async function handle(
 
   if (pathname === '/api/config' && req.method === 'PATCH') {
     const body = (await readJson(req)) as Record<string, unknown>;
-    const patch: { apiKey?: string; defaultModel?: string } = {};
+    const patch: {
+      apiKey?: string;
+      defaultModel?: string;
+      reminders?: string[];
+    } = {};
     if (typeof body.apiKey === 'string') patch.apiKey = body.apiKey;
     if (typeof body.defaultModel === 'string')
       patch.defaultModel = body.defaultModel;
+    if (body.reminders !== undefined) {
+      const remindersError = validateStringArray(body.reminders, 'reminders');
+      if (remindersError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: remindersError }));
+        return;
+      }
+      patch.reminders = body.reminders as string[];
+    }
     const updated = await updateGlobalConfig(patch);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
@@ -137,14 +157,93 @@ async function handle(
         provider: updated.provider,
         apiKey: maskApiKey(updated.apiKey),
         defaultModel: updated.defaultModel,
+        ...(updated.reminders ? { reminders: updated.reminders } : {}),
       }),
     );
     return;
   }
 
-  if (pathname === '/api/plugins' && req.method === 'GET') {
+  if (pathname === '/api/mcp' && req.method === 'GET') {
+    const servers = await listMcpServers();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ plugins: PLUGINS }));
+    res.end(JSON.stringify({ servers }));
+    return;
+  }
+
+  if (pathname === '/api/mcp/status' && req.method === 'GET') {
+    const result = await probeMcpStatuses();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+    return;
+  }
+
+  if (pathname === '/api/mcp' && req.method === 'POST') {
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const validation = validateMcpServer(body);
+    if (validation.error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: validation.error }));
+      return;
+    }
+    try {
+      const created = await createMcpServer(validation.server);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(created));
+    } catch (err) {
+      if (err instanceof Error && err.message === 'duplicate') {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'A server with that name already exists' }),
+        );
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+
+  const matchMcp = /^\/api\/mcp\/([^/]+)$/.exec(pathname);
+  if (matchMcp && req.method === 'PATCH') {
+    const name = decodeURIComponent(matchMcp[1]!);
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const validation = validateMcpServer(body);
+    if (validation.error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: validation.error }));
+      return;
+    }
+    try {
+      const updated = await updateMcpServer(name, validation.server);
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Server not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(updated));
+    } catch (err) {
+      if (err instanceof Error && err.message === 'duplicate') {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'A server with that name already exists' }),
+        );
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+
+  if (matchMcp && req.method === 'DELETE') {
+    const name = decodeURIComponent(matchMcp[1]!);
+    const removed = await deleteMcpServer(name);
+    if (!removed) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Server not found' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 
@@ -215,7 +314,36 @@ async function handle(
       input.instructions = body.instructions;
     if (body.avatar !== undefined) {
       const avatar = validateAvatar(body.avatar);
-      if (avatar) input.avatar = avatar;
+      if (!avatar) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid avatar' }));
+        return;
+      }
+      input.avatar = avatar;
+    } else {
+      // Avatar is required on create; any character is accepted.
+      input.avatar = {
+        character: AGENT_CHARACTERS[0]!,
+        color: '#27272a',
+      };
+    }
+    if (body.plugins !== undefined) {
+      const pluginsError = await validatePluginNames(body.plugins);
+      if (pluginsError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: pluginsError }));
+        return;
+      }
+      input.plugins = body.plugins as string[];
+    }
+    if (body.reminders !== undefined) {
+      const remindersError = validateStringArray(body.reminders, 'reminders');
+      if (remindersError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: remindersError }));
+        return;
+      }
+      input.reminders = body.reminders as string[];
     }
     const config = await readGlobalConfig();
     const result = await createAgent(
@@ -251,16 +379,23 @@ async function handle(
       const avatar = validateAvatar(body.avatar);
       if (avatar) patch.avatar = avatar;
     }
-    if (Array.isArray(body.plugins)) {
-      const names = body.plugins as unknown[];
-      for (const n of names) {
-        if (typeof n !== 'string' || !PLUGIN_NAMES.has(n)) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Unknown plugin: ${String(n)}` }));
-          return;
-        }
+    if (body.plugins !== undefined) {
+      const pluginsError = await validatePluginNames(body.plugins);
+      if (pluginsError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: pluginsError }));
+        return;
       }
-      patch.plugins = names as string[];
+      patch.plugins = body.plugins as string[];
+    }
+    if (body.reminders !== undefined) {
+      const remindersError = validateStringArray(body.reminders, 'reminders');
+      if (remindersError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: remindersError }));
+        return;
+      }
+      patch.reminders = body.reminders as string[];
     }
     try {
       const updated = await updateAgentConfig(id, patch);
@@ -522,6 +657,24 @@ const AGENT_CHARACTERS = [
 ];
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
+async function validatePluginNames(value: unknown): Promise<string | null> {
+  if (!Array.isArray(value)) return 'plugins must be an array of strings';
+  const known = new Set((await listMcpServers()).map((s) => s.name));
+  for (const name of value) {
+    if (typeof name !== 'string') return 'plugins must be an array of strings';
+    if (!known.has(name)) return `Unknown plugin: ${name}`;
+  }
+  return null;
+}
+
+function validateStringArray(value: unknown, field: string): string | null {
+  if (!Array.isArray(value)) return `${field} must be an array of strings`;
+  for (const item of value) {
+    if (typeof item !== 'string') return `${field} must be an array of strings`;
+  }
+  return null;
+}
+
 function validateAvatar(value: unknown): AgentAvatar | null {
   if (typeof value !== 'object' || value === null) return null;
   const candidate = value as { character?: unknown; color?: unknown };
@@ -530,6 +683,80 @@ function validateAvatar(value: unknown): AgentAvatar | null {
   if (!AGENT_CHARACTERS.includes(candidate.character)) return null;
   if (!HEX_COLOR_RE.test(candidate.color)) return null;
   return { character: candidate.character, color: candidate.color };
+}
+
+interface McpValidation {
+  server: McpServerConfig;
+  error?: string;
+}
+
+function validateMcpServer(body: Record<string, unknown>): McpValidation {
+  const name = body.name;
+  if (typeof name !== 'string' || name.trim() === '') {
+    return {
+      server: { name: '', transport: 'stdio' },
+      error: 'name is required',
+    };
+  }
+  const transport = body.transport;
+  if (transport !== 'stdio' && transport !== 'http') {
+    return {
+      server: { name: '', transport: 'stdio' },
+      error: "transport must be 'stdio' or 'http'",
+    };
+  }
+  const server: McpServerConfig = { name: name.trim(), transport };
+  if (transport === 'stdio') {
+    const command = body.command;
+    if (typeof command !== 'string' || command.trim() === '') {
+      return {
+        server: { name: '', transport: 'stdio' },
+        error: 'command is required for stdio transport',
+      };
+    }
+    server.command = command.trim();
+    if (Array.isArray(body.args)) {
+      server.args = (body.args as unknown[]).filter(
+        (a): a is string => typeof a === 'string',
+      );
+    }
+    if (
+      typeof body.env === 'object' &&
+      body.env !== null &&
+      !Array.isArray(body.env)
+    ) {
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(
+        body.env as Record<string, unknown>,
+      )) {
+        if (typeof v === 'string') env[k] = v;
+      }
+      server.env = env;
+    }
+  } else {
+    const url = body.url;
+    if (typeof url !== 'string' || url.trim() === '') {
+      return {
+        server: { name: '', transport: 'http' },
+        error: 'url is required for http transport',
+      };
+    }
+    server.url = url.trim();
+    if (
+      typeof body.headers === 'object' &&
+      body.headers !== null &&
+      !Array.isArray(body.headers)
+    ) {
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(
+        body.headers as Record<string, unknown>,
+      )) {
+        if (typeof v === 'string') headers[k] = v;
+      }
+      server.headers = headers;
+    }
+  }
+  return { server };
 }
 
 async function shutdown(
