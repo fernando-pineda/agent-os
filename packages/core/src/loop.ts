@@ -26,9 +26,12 @@ interface RunAgentLoopDeps {
 
 function buildSystemPrompt(deps: RunAgentLoopDeps): string {
   const toolNames = deps.tools.map((t) => t.spec.name).join(', ');
+  const now = new Date();
   const identity = [
     'You are an autonomous macOS agent in the agent-os system.',
     deps.agentId ? `Your id is "${deps.agentId}".` : '',
+    `You run on the model ${deps.model}.`,
+    `Current date and time: ${now.toISOString()} (${now.toString()}).`,
     deps.role ? `Your responsibility in the team is: ${deps.role}.` : '',
   ]
     .filter(Boolean)
