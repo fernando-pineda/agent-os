@@ -1,0 +1,45 @@
+export type AgentStatus = 'starting' | 'online' | 'busy' | 'error' | 'stopped';
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  group?: string;
+  workspace: string;
+  role?: string;
+  status: AgentStatus;
+  model: string;
+  tmuxSession: string;
+  currentTaskId?: string;
+  lastEventAt?: string;
+}
+
+export interface OnboardingStatus {
+  configured: boolean;
+}
+
+export interface OnboardingPayload {
+  provider: 'fireworks';
+  apiKey: string;
+  defaultModel: string;
+}
+
+export interface ModelItem {
+  id: string;
+  supportsTools: boolean;
+}
+
+export interface ModelsResponse {
+  models: ModelItem[];
+}
+
+export interface AgentsResponse {
+  agents: AgentInfo[];
+}
+
+export interface CreateAgentPayload {
+  name: string;
+  group?: string;
+  workspace?: string;
+  role?: string;
+  model?: string;
+}

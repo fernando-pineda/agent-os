@@ -1,0 +1,99 @@
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import type { GlobalConfig } from '@agent-os/core';
+
+const configPath = join(homedir(), '.agent-os', 'config.json');
+
+interface OnboardingInput {
+  provider: 'fireworks';
+  apiKey: string;
+  defaultModel: string;
+}
+
+interface ModelEntry {
+  id: string;
+  supportsTools: boolean;
+}
+
+interface ModelCache {
+  fetchedAt: number;
+  models: ModelEntry[];
+}
+
+let modelCache: ModelCache | undefined;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+export async function isConfigured(): Promise<boolean> {
+  try {
+    await access(configPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readGlobalConfig(): Promise<GlobalConfig | null> {
+  try {
+    const raw = await readFile(configPath, 'utf-8');
+    return JSON.parse(raw) as GlobalConfig;
+  } catch {
+    return null;
+  }
+}
+
+export async function onboard(input: OnboardingInput): Promise<void> {
+  const config: GlobalConfig = {
+    provider: input.provider,
+    apiKey: input.apiKey,
+    defaultModel: input.defaultModel,
+    createdAt: new Date().toISOString(),
+  };
+  await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
+  await writeFile(configPath, JSON.stringify(config, null, 2), {
+    mode: 0o600,
+    encoding: 'utf-8',
+  });
+}
+
+export async function listModels(): Promise<{
+  models: ModelEntry[];
+  warning?: string;
+}> {
+  const now = Date.now();
+  if (modelCache && now - modelCache.fetchedAt < CACHE_TTL_MS) {
+    return { models: modelCache.models };
+  }
+
+  const config = await readGlobalConfig();
+  if (!config) {
+    return { models: [], warning: 'Not configured' };
+  }
+
+  try {
+    const res = await fetch(
+      'https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=200',
+      {
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          Accept: 'application/json',
+        },
+      },
+    );
+    if (!res.ok) {
+      throw new Error(`Fireworks API returned ${res.status}`);
+    }
+    const data = (await res.json()) as unknown;
+    const models =
+      (data as { models?: Array<Record<string, unknown>> }).models ?? [];
+    const entries: ModelEntry[] = models.map((m) => ({
+      id: String(m.id ?? m.name ?? ''),
+      supportsTools: Boolean(m.supportsTools ?? m.supports_tool_calls ?? false),
+    }));
+    modelCache = { fetchedAt: now, models: entries };
+    return { models: entries };
+  } catch (err) {
+    const warning = (err as Error).message ?? String(err);
+    return { models: [], warning };
+  }
+}
