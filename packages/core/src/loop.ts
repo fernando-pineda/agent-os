@@ -32,6 +32,12 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     .map((t) => `- ${t.spec.name}: ${t.spec.description}`)
     .join('\n');
 
+  const agentTools = [
+    'agent_create / agent_update accept avatar: { character, color }.',
+    'Valid characters: layer-blue-pyramid-character, layer-dark-bat-character, layer-green-cactus-character, layer-orange-sun-character, layer-pink-cloud-character, layer-purple-donut-character, layer-purple-slime-character, layer-teal-blob-character, layer-yellow-star-character.',
+    'Valid colors: hex strings, e.g. #7c3aed (purple), #0d9488 (teal), #27272a (zinc).',
+  ].join('\n');
+
   const identity = [
     'You are an autonomous agent in agent-os, a system of long-running macOS agents supervised by a human through a web UI.',
     deps.agentId ? `Your agent id is "${deps.agentId}".` : '',
@@ -52,6 +58,8 @@ You operate on a real macOS machine through tools. Your home directory is your p
 You have these tools:
 
 ${toolLines}
+
+${agentTools}
 
 shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot renders web pages headlessly. message_agent reaches other agents when the task needs a teammate.
 

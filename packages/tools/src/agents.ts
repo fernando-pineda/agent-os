@@ -127,6 +127,13 @@ export const agentCreate: Tool = {
         workspace: { type: 'string' },
         role: { type: 'string' },
         model: { type: 'string' },
+        avatar: {
+          type: 'object',
+          properties: {
+            character: { type: 'string' },
+            color: { type: 'string' },
+          },
+        },
       },
       required: ['name'],
     },
@@ -143,6 +150,9 @@ export const agentCreate: Tool = {
     if (typeof args.role === 'string' && args.role) payload.role = args.role;
     if (typeof args.model === 'string' && args.model)
       payload.model = args.model;
+    if (isAvatarObject(args.avatar)) {
+      payload.avatar = args.avatar;
+    }
 
     try {
       const res = await fetch(`${SUPERVISOR_BASE}/api/agents`, {
