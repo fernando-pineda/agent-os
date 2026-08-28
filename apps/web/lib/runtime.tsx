@@ -269,6 +269,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const agentStatus = agents.find((a) => a.id === agentId)?.status;
   const knownIdsRef = useRef<Set<string> | null>(null);
   const fetchingRef = useRef(false);
+  const wasRunningRef = useRef(false);
 
   useEffect(() => {
     if (!loaded) return;
@@ -278,7 +279,12 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       return;
     }
     for (const m of messages) known.add(m.id);
+    const wasRunning = wasRunningRef.current;
+    wasRunningRef.current = isRunning;
     if (isRunning || fetchingRef.current) return;
+    // Skip the inbox refetch right after a local run; the turn is already in
+    // the live thread and re-fetching would duplicate it.
+    if (wasRunning) return;
     if (agentStatus !== 'busy' && agentStatus !== 'starting') return;
     fetchingRef.current = true;
     getMessages(agentId)
