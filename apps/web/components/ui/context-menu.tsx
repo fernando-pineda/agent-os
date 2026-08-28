@@ -26,10 +26,7 @@ function ContextMenuContent({
 }: ContextMenuPrimitive.Popup.Props) {
   return (
     <ContextMenuPortal>
-      <ContextMenuPrimitive.Positioner
-        sideOffset={4}
-        className="z-[9999]"
-      >
+      <ContextMenuPrimitive.Positioner sideOffset={4} className="z-[9999]">
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(

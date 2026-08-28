@@ -167,24 +167,34 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       setMessages(nextMessages);
       setIsRunning(true);
 
-      const assistantMsg: Msg = {
+      // Each text run and each tool call is its own message, in order.
+      let current: Msg = {
         id: crypto.randomUUID(),
         role: 'assistant',
         text: '',
         toolParts: [],
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [...prev, current]);
+
+      const pushCurrent = (): void => {
+        const id = current.id;
+        const snapshot = { ...current };
+        setMessages((prev) => prev.map((m) => (m.id === id ? snapshot : m)));
+      };
+
+      const startNew = (toolParts?: ToolPart[]): Msg => {
+        current = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: '',
+          ...(toolParts ? { toolParts } : {}),
+        };
+        const c = current;
+        setMessages((prev) => [...prev, c]);
+        return c;
+      };
 
       const toolMap = new Map<string, ToolPart>();
-      const pushAssistant = (): void => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsg.id
-              ? { ...assistantMsg, toolParts: Array.from(toolMap.values()) }
-              : m,
-          ),
-        );
-      };
 
       try {
         const res = await fetch(
@@ -216,22 +226,24 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
           buffer = lines.pop() ?? '';
           for (const line of lines) {
             if (line.startsWith('0:')) {
-              assistantMsg.text += JSON.parse(line.slice(2)) as string;
-              pushAssistant();
-              setLivePreview(agentId, assistantMsg.text.slice(-120));
+              // Text after a tool call joins that same message, not a new one.
+              current.text += JSON.parse(line.slice(2)) as string;
+              pushCurrent();
+              setLivePreview(agentId, current.text.slice(-120));
             } else if (line.startsWith('b:')) {
               const d = JSON.parse(line.slice(2)) as {
                 toolCallId: string;
                 toolName: string;
               };
-              toolMap.set(d.toolCallId, {
+              const tp: ToolPart = {
                 type: 'tool-call',
                 toolCallId: d.toolCallId,
                 toolName: d.toolName,
                 args: {},
                 argsText: '',
-              });
-              pushAssistant();
+              };
+              toolMap.set(d.toolCallId, tp);
+              startNew([tp]);
               setLivePreview(agentId, `Running ${d.toolName}...`);
             } else if (line.startsWith('c:')) {
               const d = JSON.parse(line.slice(2)) as {
@@ -247,7 +259,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 } catch {
                   // partial JSON while streaming
                 }
-                pushAssistant();
+                pushCurrent();
               }
             } else if (line.startsWith('a:')) {
               const d = JSON.parse(line.slice(2)) as {
@@ -262,7 +274,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                     ? d.result
                     : JSON.stringify(d.result);
                 tp.isError = Boolean(d.isError);
-                pushAssistant();
+                pushCurrent();
                 const out = (tp.result ?? '').slice(0, 100);
                 setLivePreview(agentId, out ? `→ ${out}` : 'Done');
               }
@@ -280,8 +292,11 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
           }
         }
       } catch (err) {
-        assistantMsg.text += `\nError: ${err instanceof Error ? err.message : String(err)}`;
-        pushAssistant();
+        if ((current.toolParts?.length ?? 0) > 0) {
+          startNew();
+        }
+        current.text += `\nError: ${err instanceof Error ? err.message : String(err)}`;
+        pushCurrent();
       } finally {
         setIsRunning(false);
         clearLivePreview(agentId);

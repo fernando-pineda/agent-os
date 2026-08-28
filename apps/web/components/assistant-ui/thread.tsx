@@ -30,7 +30,6 @@ import {
   MicIcon,
   MoreHorizontalIcon,
   PencilIcon,
-  RefreshCwIcon,
   SquareIcon,
 } from 'lucide-react';
 import {
@@ -584,11 +583,6 @@ const AssistantActionBar: FC = () => {
           <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
         </AuiIf>
       </ActionBarPrimitive.Copy>
-      <ActionBarPrimitive.Reload
-        render={<TooltipIconButton tooltip="Refresh" />}
-      >
-        <RefreshCwIcon />
-      </ActionBarPrimitive.Reload>
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger
           render={

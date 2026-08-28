@@ -60,17 +60,6 @@ interface ToolCallContext {
   argsText: string;
 }
 
-type NewAssistantPart =
-  | { type: 'text'; text: string }
-  | {
-      type: 'tool-call';
-      toolCallId: string;
-      toolName: string;
-      args: Record<string, unknown>;
-      result?: string;
-      isError?: boolean;
-    };
-
 interface TurnSegment {
   kind: 'text' | 'tool';
   text?: string;
@@ -270,7 +259,12 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
                   outputTokens: event.usage.completionTokens ?? 0,
                 };
               }
-              handleStreamEvent(event, streamController, toolContexts, segments);
+              handleStreamEvent(
+                event,
+                streamController,
+                toolContexts,
+                segments,
+              );
             },
           });
           await persistTurn(messages, segments, serverDeps);
@@ -342,17 +336,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           if (event.type === 'text-delta') {
             replyParts.push(event.delta);
           }
-          handleStreamEvent(
-            event,
-            undefined,
-            toolContexts,
-            newAssistantParts,
-            textParts,
-          );
+          handleStreamEvent(event, undefined, toolContexts, segments);
         },
       });
       const text = replyParts.join('');
-      await persistTurn([], newAssistantParts, textParts, serverDeps);
+      await persistTurn([], segments, serverDeps);
       return text;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);
@@ -419,8 +407,7 @@ function handleStreamEvent(
 
 async function persistTurn(
   existingMessages: UIMessage[],
-  newAssistantParts: NewAssistantPart[],
-  textParts: string[],
+  segments: TurnSegment[],
   deps: ServerDeps,
 ): Promise<void> {
   // Persist the full thread as sent by the client (it already includes the
@@ -433,31 +420,49 @@ async function persistTurn(
     (m) => !m.id || !storedIds.has(m.id),
   );
   const messages = [...stored, ...incoming];
-  const assistantParts: UIMessage['parts'] = [];
-  if (textParts.length > 0) {
-    assistantParts.push({ type: 'text', text: textParts.join('') });
-  }
-  for (const part of newAssistantParts) {
-    if (part.type === 'tool-call') {
-      assistantParts.push({
-        type: 'tool-call',
-        toolCallId: part.toolCallId,
-        toolName: part.toolName,
-        args: part.args,
-        ...(part.result !== undefined && { result: part.result }),
-        ...(part.isError !== undefined && { isError: part.isError }),
-      });
+
+  // Group segments into messages: a tool call starts a new message;
+  // following text joins that message. Leading text is its own message.
+  let current: UIMessage | undefined;
+  const flush = (): void => {
+    if (current && (current.content || (current.parts?.length ?? 0) > 0)) {
+      messages.push(current);
+    }
+    current = undefined;
+  };
+  for (const seg of segments) {
+    if (seg.kind === 'text' && seg.text) {
+      if (!current) {
+        current = { id: crypto.randomUUID(), role: 'assistant', content: '' };
+      }
+      current.content = (current.content ?? '') + seg.text;
+      const parts = current.parts ?? [];
+      const lastText = parts[parts.length - 1];
+      if (lastText?.type === 'text') {
+        lastText.text += seg.text;
+      } else {
+        parts.push({ type: 'text', text: seg.text });
+      }
+      current.parts = parts;
+    } else if (seg.kind === 'tool' && seg.toolCallId) {
+      flush();
+      current = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-call',
+            toolCallId: seg.toolCallId,
+            toolName: seg.toolName ?? '',
+            args: seg.args ?? {},
+            ...(seg.result !== undefined && { result: seg.result }),
+            ...(seg.isError !== undefined && { isError: seg.isError }),
+          },
+        ],
+      };
     }
   }
-  const assistantMessage: UIMessage = {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    content: textParts.join(''),
-  };
-  if (assistantParts.length > 0) {
-    assistantMessage.parts = assistantParts;
-  }
-  messages.push(assistantMessage);
+  flush();
   await saveThread(deps.homeDir, messages);
 }
 
