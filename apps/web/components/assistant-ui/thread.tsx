@@ -43,6 +43,8 @@ import {
   ComposerAttachments,
   UserMessageAttachments,
 } from '@/components/assistant-ui/attachment';
+import { ContextDisplay } from '@/components/assistant-ui/context-display';
+import { useAgentSelection, useAgentUsage } from '@/components/agent-context';
 import { File } from '@/components/assistant-ui/file';
 import { ThreadFollowupSuggestions } from '@/components/assistant-ui/follow-up-suggestions';
 import { Image } from '@/components/assistant-ui/image';
@@ -299,9 +301,25 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
 };
 
 const ComposerAction: FC = () => {
+  const { selectedAgentId } = useAgentSelection();
+  const { usage } = useAgentUsage();
+  const u = selectedAgentId ? usage[selectedAgentId] : undefined;
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
-      <ComposerAddAttachment />
+      <div className="flex items-center gap-2">
+        <ComposerAddAttachment />
+        {u && (
+          <ContextDisplay.Text
+            modelContextWindow={262144}
+            usage={{
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              totalTokens: u.inputTokens + u.outputTokens,
+            }}
+            className="text-xs text-zinc-500"
+          />
+        )}
+      </div>
       <div className="flex items-center gap-1.5">
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>

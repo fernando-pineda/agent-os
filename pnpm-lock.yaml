@@ -64,6 +64,9 @@ importers:
       '@ai-sdk/react':
         specifier: ^4.0.86
         version: 4.0.86(react@19.2.8)(zod@3.25.76)
+      '@assistant-ui/ai-sdk':
+        specifier: ^0.0.3
+        version: 0.0.3(@types/react@19.2.18)(ioredis@5.11.1)(react@19.2.8)(zod@3.25.76)(zustand@5.0.15(@types/react@19.2.18)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8)))
       '@assistant-ui/react':
         specifier: 0.15.17
         version: 0.15.17(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(ioredis@5.11.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
