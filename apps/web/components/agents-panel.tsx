@@ -271,29 +271,45 @@ function GroupSection({
   openDeleteDialog: (agent: AgentInfo) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const handleDragOver = (e: React.DragEvent): void => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+  const handleDragLeave = (): void => setDragOver(false);
+  const handleDrop = (e: React.DragEvent): void => {
+    e.preventDefault();
+    setDragOver(false);
+    const agentId = e.dataTransfer.getData('text/agent-id');
+    if (agentId) onDropAgent(agentId, name);
+  };
   return (
     <>
       <li
         className={`sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-400 ${
           dragOver ? 'bg-zinc-800' : ''
         }`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          const agentId = e.dataTransfer.getData('text/agent-id');
-          if (agentId) onDropAgent(agentId, name);
-        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
         <span>{name || 'Ungrouped'}</span>
         <span className="text-zinc-600">{agents.length}</span>
       </li>
+      {agents.length === 0 ? (
+        <li
+          className={`px-3 py-3 text-center text-xs text-zinc-600 ${
+            dragOver ? 'bg-zinc-800' : ''
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          Drop agents here
+        </li>
+      ) : null}
       {agents.map((agent) => {
         const selected = agent.id === selectedAgentId;
+        const rowDragOver = dragOver;
         const isRunning = agent.status === 'online' || agent.status === 'busy';
         return (
           <ContextMenu key={agent.id}>
@@ -306,8 +322,11 @@ function GroupSection({
                     e.dataTransfer.effectAllowed = 'move';
                   }}
                   className={`cursor-pointer px-3 py-2 transition-colors hover:bg-zinc-800 ${
-                    selected ? 'bg-zinc-800' : ''
+                    selected || rowDragOver ? 'bg-zinc-800' : ''
                   }`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
                   onClick={() => onSelect(agent.id)}
                 />
               }
