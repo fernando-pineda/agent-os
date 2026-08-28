@@ -25,6 +25,7 @@ export interface AgentConfig {
   };
   sandboxed?: boolean;
   avatar?: AgentAvatar;
+  instructions?: string;
   createdAt: string;
 }
 
@@ -48,6 +49,7 @@ export interface AgentInfo {
   currentTaskId?: string;
   lastEventAt?: string;
   avatar?: AgentAvatar;
+  instructions?: string;
 }
 
 export interface ToolSpec {

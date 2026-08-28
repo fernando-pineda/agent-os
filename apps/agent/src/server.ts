@@ -268,6 +268,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             messages: chatMessages,
             agentId: serverDeps.agentId,
             ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
+            ...(serverDeps.agent.instructions
+              ? { instructions: serverDeps.agent.instructions }
+              : {}),
             ...(memoryIndex ? { memoryIndex } : {}),
             buildContext: serverDeps.buildContext,
             signal: controller.signal,
@@ -380,6 +383,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         messages: chatMessages,
         agentId: serverDeps.agentId,
         ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
+        ...(serverDeps.agent.instructions
+          ? { instructions: serverDeps.agent.instructions }
+          : {}),
         buildContext: serverDeps.buildContext,
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {

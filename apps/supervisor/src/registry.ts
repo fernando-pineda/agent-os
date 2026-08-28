@@ -123,6 +123,7 @@ export interface CreateAgentInput {
   model?: string | undefined;
   sandboxed?: boolean | undefined;
   avatar?: AgentAvatar | undefined;
+  instructions?: string | undefined;
   git?: {
     userName?: string;
     userEmail?: string;
@@ -156,6 +157,7 @@ export async function updateAgentConfig(
     workspace?: string | undefined;
     sandboxed?: boolean | undefined;
     avatar?: AgentAvatar | undefined;
+    instructions?: string | undefined;
   },
 ): Promise<AgentConfig | null> {
   const config = await readAgentConfig(id);
@@ -167,6 +169,8 @@ export async function updateAgentConfig(
   if (patch.model !== undefined) config.model = patch.model;
   if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
   if (patch.avatar !== undefined) config.avatar = patch.avatar;
+  if (patch.instructions !== undefined)
+    config.instructions = patch.instructions;
   if (patch.workspace !== undefined) {
     const validationError = validateWorkspace(patch.workspace);
     if (validationError) {
@@ -239,6 +243,7 @@ export async function createAgent(
   if (input.model) config.model = input.model;
   if (input.sandboxed) config.sandboxed = input.sandboxed;
   if (input.avatar) config.avatar = input.avatar;
+  if (input.instructions) config.instructions = input.instructions;
   if (input.git) {
     config.git = {
       ...(input.git.userName ? { userName: input.git.userName } : {}),
@@ -512,6 +517,9 @@ export function toAgentInfo(
   }
   if (config.avatar) {
     info.avatar = config.avatar;
+  }
+  if (config.instructions) {
+    info.instructions = config.instructions;
   }
   return info;
 }

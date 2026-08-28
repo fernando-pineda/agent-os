@@ -27,6 +27,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
 import {
+  Tabs,
+  TabsIndicator,
+  TabsList,
+  TabsPanel,
+  TabsTab,
+} from '@/components/ui/tabs';
+import {
   createAgent,
   createGroup,
   deleteAgent,
@@ -88,19 +95,17 @@ function avatarTileBackground(color: string): string {
 
 function AgentForm({
   name,
-  group,
-  workspace,
   role,
   model,
   character,
   color,
+  instructions,
   onName,
-  onGroup,
-  onWorkspace,
   onRole,
   onModel,
   onCharacter,
   onColor,
+  onInstructions,
   models,
   loadingModels,
   submitLabel,
@@ -110,19 +115,17 @@ function AgentForm({
   error,
 }: {
   name: string;
-  group: string;
-  workspace: string;
   role: string;
   model: string;
   character: string;
   color: string;
+  instructions: string;
   onName: (v: string) => void;
-  onGroup: (v: string) => void;
-  onWorkspace: (v: string) => void;
   onRole: (v: string) => void;
   onModel: (v: string) => void;
   onCharacter: (v: string) => void;
   onColor: (v: string) => void;
+  onInstructions: (v: string) => void;
   models: ModelItem[];
   loadingModels: boolean;
   submitLabel: string;
@@ -132,66 +135,81 @@ function AgentForm({
   error?: string;
 }) {
   return (
-    <div className="space-y-3 overflow-y-auto py-2 pr-1">
-      <div>
-        <label className="mb-1 block text-xs text-zinc-400">Name</label>
-        <Input
-          value={name}
-          onChange={(e) => onName(e.target.value)}
-          placeholder="research-agent"
-          className="border-zinc-800 bg-zinc-950 text-zinc-100"
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-zinc-400">Group</label>
-        <Input
-          value={group}
-          onChange={(e) => onGroup(e.target.value)}
-          placeholder="research"
-          className="border-zinc-800 bg-zinc-950 text-zinc-100"
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-zinc-400">Workspace</label>
-        <Input
-          value={workspace}
-          onChange={(e) => onWorkspace(e.target.value)}
-          placeholder="solo"
-          className="border-zinc-800 bg-zinc-950 text-zinc-100"
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-zinc-400">Role</label>
-        <Input
-          value={role}
-          onChange={(e) => onRole(e.target.value)}
-          placeholder="planner"
-          className="border-zinc-800 bg-zinc-950 text-zinc-100"
-        />
-      </div>
-      <ModelPickerModal
-        models={models}
-        value={model}
-        onChange={onModel}
-        loading={loadingModels}
-        allowManual={models.length === 0}
-        placeholder="Default"
-      />
-      <AvatarPicker
-        character={character}
-        color={color}
-        onCharacter={onCharacter}
-        onColor={onColor}
-      />
-      {error && <div className="text-xs text-destructive">{error}</div>}
+    <Tabs defaultValue="general">
+      <TabsList>
+        <TabsTab value="general">General</TabsTab>
+        <TabsTab value="instructions">Instructions & roles</TabsTab>
+        <TabsTab value="automations">Automations</TabsTab>
+        <TabsIndicator />
+      </TabsList>
+      <TabsPanel value="general">
+        <div className="space-y-3 overflow-y-auto py-2 pr-1">
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Name</label>
+            <Input
+              value={name}
+              onChange={(e) => onName(e.target.value)}
+              placeholder="research-agent"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+          <ModelPickerModal
+            models={models}
+            value={model}
+            onChange={onModel}
+            loading={loadingModels}
+            allowManual={models.length === 0}
+            placeholder="Default"
+          />
+          <AvatarPicker
+            character={character}
+            color={color}
+            onCharacter={onCharacter}
+            onColor={onColor}
+          />
+        </div>
+      </TabsPanel>
+      <TabsPanel value="instructions">
+        <div className="space-y-3 overflow-y-auto py-2 pr-1">
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Role</label>
+            <Input
+              value={role}
+              onChange={(e) => onRole(e.target.value)}
+              placeholder="planner"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">
+              Instructions
+            </label>
+            <textarea
+              value={instructions}
+              onChange={(e) => onInstructions(e.target.value)}
+              placeholder="Extra instructions for this agent, injected into its system prompt."
+              rows={6}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+            />
+          </div>
+        </div>
+      </TabsPanel>
+      <TabsPanel value="automations">
+        <div className="py-6 text-center text-xs text-zinc-500">
+          Automations are not available yet.
+        </div>
+      </TabsPanel>
+      {error && (
+        <div className="px-1 pb-2 text-xs text-destructive">{error}</div>
+      )}
       <Button
         onClick={onSubmit}
         disabled={submitDisabled || submitting}
-        className="w-full"
+        className="mt-2 w-full"
       >
         {submitting ? 'Saving...' : submitLabel}
       </Button>
-    </div>
+    </Tabs>
   );
 }
 
@@ -438,10 +456,9 @@ export function AgentsPanel() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
-  const [group, setGroup] = useState('');
-  const [workspace, setWorkspace] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState('');
+  const [instructions, setInstructions] = useState('');
   const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
   const [color, setColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
   const [creating, setCreating] = useState(false);
@@ -467,27 +484,24 @@ export function AgentsPanel() {
     try {
       const payload: {
         name: string;
-        group?: string;
-        workspace?: string;
         role?: string;
         model?: string;
+        instructions?: string;
         avatar: AgentAvatar;
       } = {
         name: name.trim(),
         avatar: { character, color },
       };
-      if (group.trim()) payload.group = group.trim();
-      if (workspace.trim()) payload.workspace = workspace.trim();
       if (role.trim()) payload.role = role.trim();
       if (model.trim()) payload.model = model.trim();
+      if (instructions.trim()) payload.instructions = instructions.trim();
       const agent = await createAgent(payload);
       setSelectedAgentId(agent.id);
       setDialogOpen(false);
       setName('');
-      setGroup('');
-      setWorkspace('');
       setRole('');
       setModel('');
+      setInstructions('');
       setCharacter(AGENT_CHARACTERS[0]);
       setColor(AGENT_AVATAR_DEFAULT_COLOR);
     } catch (err) {
@@ -495,16 +509,7 @@ export function AgentsPanel() {
     } finally {
       setCreating(false);
     }
-  }, [
-    name,
-    group,
-    workspace,
-    role,
-    model,
-    character,
-    color,
-    setSelectedAgentId,
-  ]);
+  }, [name, role, model, instructions, character, color, setSelectedAgentId]);
 
   const onCreateGroup = useCallback(async () => {
     const trimmed = groupName.trim();
@@ -594,9 +599,8 @@ export function AgentsPanel() {
   // --- Edit dialog state ---
   const [editDialog, setEditDialog] = useState<AgentInfo | null>(null);
   const [editName, setEditName] = useState('');
-  const [editGroup, setEditGroup] = useState('');
-  const [editWorkspace, setEditWorkspace] = useState('');
   const [editRole, setEditRole] = useState('');
+  const [editInstructions, setEditInstructions] = useState('');
   const [editModel, setEditModel] = useState('');
   const [editCharacter, setEditCharacter] = useState<string>(
     AGENT_CHARACTERS[0],
@@ -608,9 +612,8 @@ export function AgentsPanel() {
   const openEditDialog = useCallback((agent: AgentInfo) => {
     setEditDialog(agent);
     setEditName(agent.name);
-    setEditGroup(agent.group ?? '');
-    setEditWorkspace(agent.workspace);
     setEditRole(agent.role ?? '');
+    setEditInstructions(agent.instructions ?? '');
     setEditModel(agent.model);
     setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
     setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
@@ -629,10 +632,9 @@ export function AgentsPanel() {
     try {
       await updateAgent(editDialog.id, {
         name: editName.trim() || undefined,
-        group: editGroup.trim() || undefined,
-        workspace: editWorkspace.trim() || undefined,
         role: editRole.trim() || undefined,
         model: editModel.trim() || undefined,
+        instructions: editInstructions.trim() || undefined,
         avatar: { character: editCharacter, color: editColor },
       });
       closeEditDialog();
@@ -646,9 +648,8 @@ export function AgentsPanel() {
   }, [
     editDialog,
     editName,
-    editGroup,
-    editWorkspace,
     editRole,
+    editInstructions,
     editModel,
     editCharacter,
     editColor,
@@ -685,19 +686,17 @@ export function AgentsPanel() {
             </DialogHeader>
             <AgentForm
               name={name}
-              group={group}
-              workspace={workspace}
               role={role}
               model={model}
               character={character}
               color={color}
+              instructions={instructions}
               onName={setName}
-              onGroup={setGroup}
-              onWorkspace={setWorkspace}
               onRole={setRole}
               onModel={setModel}
               onCharacter={setCharacter}
               onColor={setColor}
+              onInstructions={setInstructions}
               models={models}
               loadingModels={loadingModels}
               submitLabel="Create agent"
@@ -826,19 +825,17 @@ export function AgentsPanel() {
           </DialogHeader>
           <AgentForm
             name={editName}
-            group={editGroup}
-            workspace={editWorkspace}
             role={editRole}
             model={editModel}
             character={editCharacter}
             color={editColor}
+            instructions={editInstructions}
             onName={setEditName}
-            onGroup={setEditGroup}
-            onWorkspace={setEditWorkspace}
             onRole={setEditRole}
             onModel={setEditModel}
             onCharacter={setEditCharacter}
             onColor={setEditColor}
+            onInstructions={setEditInstructions}
             models={models}
             loadingModels={loadingModels}
             submitLabel="Save changes"

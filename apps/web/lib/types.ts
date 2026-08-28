@@ -23,6 +23,7 @@ export interface AgentInfo {
   currentTaskId?: string;
   lastEventAt?: string;
   avatar?: AgentAvatar;
+  instructions?: string;
 }
 
 export interface OnboardingStatus {
@@ -66,4 +67,5 @@ export interface UpdateAgentPayload {
   model?: string;
   sandboxed?: boolean;
   avatar?: AgentAvatar;
+  instructions?: string;
 }

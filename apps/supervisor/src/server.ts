@@ -167,6 +167,8 @@ async function handle(
     if (typeof body.role === 'string') input.role = body.role;
     if (typeof body.model === 'string') input.model = body.model;
     if (typeof body.sandboxed === 'boolean') input.sandboxed = body.sandboxed;
+    if (typeof body.instructions === 'string')
+      input.instructions = body.instructions;
     if (body.avatar !== undefined) {
       const avatar = validateAvatar(body.avatar);
       if (avatar) input.avatar = avatar;
@@ -196,6 +198,8 @@ async function handle(
     if (typeof body.name === 'string') patch.name = body.name;
     if (typeof body.group === 'string') patch.group = body.group;
     if (typeof body.role === 'string') patch.role = body.role;
+    if (typeof body.instructions === 'string')
+      patch.instructions = body.instructions;
     if (typeof body.model === 'string') patch.model = body.model;
     if (typeof body.workspace === 'string') patch.workspace = body.workspace;
     if (typeof body.sandboxed === 'boolean') patch.sandboxed = body.sandboxed;

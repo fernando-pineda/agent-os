@@ -19,6 +19,7 @@ interface RunAgentLoopDeps {
   messages: ChatMessage[];
   agentId?: string;
   role?: string;
+  instructions?: string;
   memoryIndex?: string;
   signal?: AbortSignal;
   buildContext?: (signal?: AbortSignal) => ToolContext;
@@ -45,6 +46,9 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     `Current date and time: ${now.toISOString()} (${now.toString()}). Use this for anything date-sensitive instead of your training cutoff.`,
     deps.role
       ? `Your role in the team: ${deps.role}. Let it shape your priorities and tone.`
+      : '',
+    deps.instructions
+      ? `Additional instructions for this agent:\n${deps.instructions}`
       : '',
     'You are a persistent process. Your conversation thread survives restarts in thread.json, and a long-term memory index keeps facts from past sessions.',
   ]
