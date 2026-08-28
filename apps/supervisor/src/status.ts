@@ -109,7 +109,10 @@ export class StatusTrackerImpl implements StatusTracker {
       const currentStatus = existing?.status ?? 'stopped';
       if (
         currentStatus !== health.status ||
-        existing?.currentTaskId !== health.currentTaskId
+        existing?.currentTaskId !== health.currentTaskId ||
+        existing?.group !== config.group ||
+        existing?.name !== config.name ||
+        existing?.role !== config.role
       ) {
         const info = toAgentInfo(
           config,

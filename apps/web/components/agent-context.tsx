@@ -8,7 +8,12 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { getAgents, getModels, subscribeAgentEvents } from '@/lib/api';
+import {
+  getAgents,
+  getGroups,
+  getModels,
+  subscribeAgentEvents,
+} from '@/lib/api';
 import type { AgentInfo, ModelItem } from '@/lib/types';
 
 export type AgentUsage = { inputTokens: number; outputTokens: number };
@@ -25,6 +30,8 @@ type AgentContextValue = {
   usage: Record<string, AgentUsage>;
   setUsage: (agentId: string, u: AgentUsage) => void;
   models: ModelItem[];
+  groups: string[];
+  refreshGroups: () => void;
 };
 
 const AgentContext = createContext<AgentContextValue>({
@@ -37,6 +44,8 @@ const AgentContext = createContext<AgentContextValue>({
   usage: {},
   setUsage: () => {},
   models: [],
+  groups: [],
+  refreshGroups: () => {},
 });
 
 export function AgentProvider({ children }: { children: ReactNode }) {
@@ -45,6 +54,11 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [livePreview, setLive] = useState<Record<string, string>>({});
   const [usage, setUsageMap] = useState<Record<string, AgentUsage>>({});
   const [models, setModels] = useState<ModelItem[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
+
+  const refreshGroups = useCallback(() => {
+    getGroups().then(setGroups).catch(console.error);
+  }, []);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
 
   const setUsage = useCallback((agentId: string, u: AgentUsage) => {
@@ -67,12 +81,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     getAgents().then(setAgents).catch(console.error);
     getModels().then(setModels).catch(console.error);
+    refreshGroups();
     const unsubscribe = subscribeAgentEvents(
       (snapshot) => setAgents(snapshot),
       (error) => console.error(error),
     );
     return unsubscribe;
-  }, []);
+  }, [refreshGroups]);
 
   return (
     <AgentContext.Provider
@@ -86,6 +101,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         usage,
         setUsage,
         models,
+        groups,
+        refreshGroups,
       }}
     >
       {children}
@@ -124,4 +141,12 @@ export function useAgentUsage(): {
 
 export function useModelsFeed(): { models: ModelItem[] } {
   return { models: useContext(AgentContext).models };
+}
+
+export function useGroupsFeed(): {
+  groups: string[];
+  refreshGroups: () => void;
+} {
+  const ctx = useContext(AgentContext);
+  return { groups: ctx.groups, refreshGroups: ctx.refreshGroups };
 }

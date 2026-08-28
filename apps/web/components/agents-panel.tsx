@@ -2,7 +2,11 @@
 
 import { PencilIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
+import {
+  useAgentSelection,
+  useAgentsFeed,
+  useGroupsFeed,
+} from '@/components/agent-context';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,8 +25,10 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
 import {
   createAgent,
+  createGroup,
   deleteAgent,
   getModels,
   startAgent,
@@ -245,9 +251,154 @@ function AvatarPicker({
   );
 }
 
+function GroupSection({
+  name,
+  agents,
+  selectedAgentId,
+  onSelect,
+  onDropAgent,
+  openEditDialog,
+  toggleStartStop,
+  openDeleteDialog,
+}: {
+  name: string;
+  agents: AgentInfo[];
+  selectedAgentId: string | null;
+  onSelect: (id: string) => void;
+  onDropAgent: (agentId: string, group: string) => void;
+  openEditDialog: (agent: AgentInfo) => void;
+  toggleStartStop: (agent: AgentInfo) => void;
+  openDeleteDialog: (agent: AgentInfo) => void;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  return (
+    <>
+      <li
+        className={`sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-400 ${
+          dragOver ? 'bg-zinc-800' : ''
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          const agentId = e.dataTransfer.getData('text/agent-id');
+          if (agentId) onDropAgent(agentId, name);
+        }}
+      >
+        <span>{name || 'Ungrouped'}</span>
+        <span className="text-zinc-600">{agents.length}</span>
+      </li>
+      {agents.map((agent) => {
+        const selected = agent.id === selectedAgentId;
+        const isRunning = agent.status === 'online' || agent.status === 'busy';
+        return (
+          <ContextMenu key={agent.id}>
+            <ContextMenuTrigger
+              render={
+                <li
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/agent-id', agent.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  className={`cursor-pointer px-3 py-2 transition-colors hover:bg-zinc-800 ${
+                    selected ? 'bg-zinc-800' : ''
+                  }`}
+                  onClick={() => onSelect(agent.id)}
+                />
+              }
+            >
+              <div className="flex items-center gap-2.5">
+                {agent.avatar ? (
+                  <div className="relative shrink-0 p-0.5">
+                    <div
+                      className="size-10 rounded-xl"
+                      style={{
+                        background: avatarTileBackground(agent.avatar.color),
+                      }}
+                    >
+                      <img
+                        src={avatarImagePath(agent.avatar.character)}
+                        alt=""
+                        className="size-full object-contain p-1"
+                      />
+                    </div>
+                    <span
+                      className={`absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-zinc-900 ${statusColor(
+                        agent.status,
+                      )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
+                    />
+                  </div>
+                ) : null}
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-zinc-200">
+                    {agent.name}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
+                    {agent.group && (
+                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
+                        {agent.group}
+                      </span>
+                    )}
+                    {agent.workspace !== agent.id && (
+                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-400">
+                        {agent.workspace}
+                      </span>
+                    )}
+                    <span className="font-mono">
+                      {truncateModel(agent.model)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {agent.currentTaskId && (
+                <div className="mt-1 text-xs text-zinc-500">
+                  task {agent.currentTaskId.slice(0, 8)}
+                </div>
+              )}
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => openEditDialog(agent)}>
+                <PencilIcon className="size-4 text-zinc-400" />
+                Edit
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => void toggleStartStop(agent)}>
+                {isRunning ? (
+                  <>
+                    <SquareIcon className="size-4 text-zinc-400" />
+                    Stop
+                  </>
+                ) : (
+                  <>
+                    <PlayIcon className="size-4 text-zinc-400" />
+                    Start
+                  </>
+                )}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => openDeleteDialog(agent)}
+                className="text-red-400 focus:bg-red-950/50 focus:text-red-300"
+              >
+                <Trash2Icon className="size-4" />
+                Delete
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+        );
+      })}
+    </>
+  );
+}
+
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
+  const { groups, refreshGroups } = useGroupsFeed();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -259,6 +410,10 @@ export function AgentsPanel() {
   const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
   const [color, setColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
   const [creating, setCreating] = useState(false);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupError, setGroupError] = useState('');
 
   useEffect(() => {
     setLoadingModels(true);
@@ -315,6 +470,29 @@ export function AgentsPanel() {
     color,
     setSelectedAgentId,
   ]);
+
+  const onCreateGroup = useCallback(async () => {
+    const trimmed = groupName.trim();
+    if (!trimmed) return;
+    setCreatingGroup(true);
+    setGroupError('');
+    try {
+      await createGroup(trimmed);
+      refreshGroups();
+      setGroupDialogOpen(false);
+      setGroupName('');
+    } catch (err) {
+      setGroupError(
+        err instanceof Error ? err.message : 'Failed to create group',
+      );
+    } finally {
+      setCreatingGroup(false);
+    }
+  }, [groupName, refreshGroups]);
+
+  const onDropAgent = useCallback((agentId: string, targetGroup: string) => {
+    void updateAgent(agentId, { group: targetGroup || undefined });
+  }, []);
 
   const toggleStartStop = useCallback(async (agent: AgentInfo) => {
     try {
@@ -430,8 +608,8 @@ export function AgentsPanel() {
     <div className="flex h-full flex-col border-t border-zinc-800 bg-zinc-900">
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
         <span className="text-xs font-medium text-zinc-400">Agents</span>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger
+        <Menu>
+          <MenuTrigger
             render={
               <Button
                 variant="ghost"
@@ -441,7 +619,15 @@ export function AgentsPanel() {
             }
           >
             + New
-          </DialogTrigger>
+          </MenuTrigger>
+          <MenuContent>
+            <MenuItem onClick={() => setDialogOpen(true)}>New agent</MenuItem>
+            <MenuItem onClick={() => setGroupDialogOpen(true)}>
+              New group
+            </MenuItem>
+          </MenuContent>
+        </Menu>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
             <DialogHeader>
               <DialogTitle>New agent</DialogTitle>
@@ -479,106 +665,71 @@ export function AgentsPanel() {
           </div>
         )}
         <ul className="divide-y divide-zinc-800">
-          {agents.map((agent) => {
-            const selected = agent.id === selectedAgentId;
-            const isRunning =
-              agent.status === 'online' || agent.status === 'busy';
-            return (
-              <ContextMenu key={agent.id}>
-                <ContextMenuTrigger
-                  render={
-                    <li
-                      className={`cursor-pointer px-3 py-2 transition-colors hover:bg-zinc-800 ${
-                        selected ? 'bg-zinc-800' : ''
-                      }`}
-                      onClick={() => setSelectedAgentId(agent.id)}
-                    />
-                  }
-                >
-                  <div className="flex items-center gap-2.5">
-                    {agent.avatar ? (
-                      // Dot sits outside the clipped tile so it stays visible.
-                      <div className="relative shrink-0 p-0.5">
-                        <div
-                          className="size-10 rounded-xl"
-                          style={{
-                            background: avatarTileBackground(
-                              agent.avatar.color,
-                            ),
-                          }}
-                        >
-                          <img
-                            src={avatarImagePath(agent.avatar.character)}
-                            alt=""
-                            className="size-full object-contain p-1"
-                          />
-                        </div>
-                        <span
-                          className={`absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-zinc-900 ${statusColor(
-                            agent.status,
-                          )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
-                        />
-                      </div>
-                    ) : null}
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-200">
-                        {agent.name}
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
-                        {agent.group && (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
-                            {agent.group}
-                          </span>
-                        )}
-                        {agent.workspace !== agent.id && (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-400">
-                            {agent.workspace}
-                          </span>
-                        )}
-                        <span className="font-mono">
-                          {truncateModel(agent.model)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  {agent.currentTaskId && (
-                    <div className="mt-1 text-xs text-zinc-500">
-                      task {agent.currentTaskId.slice(0, 8)}
-                    </div>
-                  )}
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuItem onClick={() => openEditDialog(agent)}>
-                    <PencilIcon className="size-4 text-zinc-400" />
-                    Edit
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => void toggleStartStop(agent)}>
-                    {isRunning ? (
-                      <>
-                        <SquareIcon className="size-4 text-zinc-400" />
-                        Stop
-                      </>
-                    ) : (
-                      <>
-                        <PlayIcon className="size-4 text-zinc-400" />
-                        Start
-                      </>
-                    )}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onClick={() => openDeleteDialog(agent)}
-                    className="text-red-400 focus:bg-red-950/50 focus:text-red-300"
-                  >
-                    <Trash2Icon className="size-4" />
-                    Delete
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            );
-          })}
+          {(() => {
+            const byGroup = new Map<string, AgentInfo[]>();
+            const allGroups = new Set([
+              ...groups,
+              ...(agents.map((a) => a.group).filter(Boolean) as string[]),
+            ]);
+            for (const g of allGroups) byGroup.set(g, []);
+            const ungrouped: AgentInfo[] = [];
+            for (const a of agents) {
+              if (a.group && byGroup.has(a.group)) {
+                byGroup.get(a.group)!.push(a);
+              } else {
+                ungrouped.push(a);
+              }
+            }
+            const sections: { name: string; agents: AgentInfo[] }[] = [];
+            for (const [name, list] of byGroup) {
+              sections.push({ name, agents: list });
+            }
+            if (ungrouped.length > 0 || sections.length === 0) {
+              sections.push({ name: '', agents: ungrouped });
+            }
+            return sections;
+          })().map((section) => (
+            <GroupSection
+              key={section.name || 'ungrouped'}
+              name={section.name}
+              agents={section.agents}
+              selectedAgentId={selectedAgentId}
+              onSelect={setSelectedAgentId}
+              onDropAgent={onDropAgent}
+              openEditDialog={openEditDialog}
+              toggleStartStop={toggleStartStop}
+              openDeleteDialog={openDeleteDialog}
+            />
+          ))}
         </ul>
       </div>
+
+      {/* New group dialog */}
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New group</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="research"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+            {groupError && (
+              <div className="text-xs text-destructive">{groupError}</div>
+            )}
+            <Button
+              onClick={onCreateGroup}
+              disabled={!groupName.trim() || creatingGroup}
+              className="w-full"
+            >
+              {creatingGroup ? 'Creating...' : 'Create group'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete dialog */}
       <Dialog open={deleteDialog !== null} onOpenChange={closeDeleteDialog}>

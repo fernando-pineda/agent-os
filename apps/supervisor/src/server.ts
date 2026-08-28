@@ -5,6 +5,7 @@ import {
 } from 'node:http';
 import { URL } from 'node:url';
 import type { AgentAvatar, AgentInfo } from '@agent-os/core';
+import { createGroup, deleteGroup, loadGroups } from './groups.js';
 import { installLaunchdAgent, uninstallLaunchdAgent } from './launchd.js';
 import {
   isConfigured,
@@ -17,6 +18,7 @@ import {
   createAgent,
   deleteAgent,
   getAgentPort,
+  listAgentConfigs,
   readAgentConfig,
   startAgent,
   stopAgent,
@@ -106,6 +108,47 @@ async function handle(
     const result = await listModels();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  if (pathname === '/api/groups' && req.method === 'GET') {
+    const groups = await loadGroups();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ groups }));
+    return;
+  }
+
+  if (pathname === '/api/groups' && req.method === 'POST') {
+    const body = (await readJson(req)) as { name?: string };
+    const name = body.name?.trim();
+    if (!name) {
+      res.writeHead(422, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'name is required' }));
+      return;
+    }
+    const result = await createGroup(name);
+    if (result === 'exists') {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Group already exists' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  const matchGroup = /^\/api\/groups\/([^/]+)$/.exec(pathname);
+  if (matchGroup && req.method === 'DELETE') {
+    const name = decodeURIComponent(matchGroup[1]!);
+    await deleteGroup(name);
+    const configs = await listAgentConfigs();
+    for (const config of configs) {
+      if (config.group === name) {
+        await updateAgentConfig(config.id, { group: '' });
+      }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 

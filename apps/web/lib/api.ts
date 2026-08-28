@@ -41,6 +41,25 @@ export async function getModels(): Promise<ModelItem[]> {
   return res.models;
 }
 
+export async function getGroups(): Promise<string[]> {
+  const data = await fetchJson<{ groups: string[] }>(`${BASE}/api/groups`);
+  return data.groups;
+}
+
+export async function createGroup(name: string): Promise<void> {
+  await fetchJson(`${BASE}/api/groups`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteGroup(name: string): Promise<void> {
+  await fetchJson(`${BASE}/api/groups/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function getAgents(): Promise<AgentInfo[]> {
   const res = await fetchJson<AgentsResponse>(`${BASE}/api/agents`);
   return res.agents;
