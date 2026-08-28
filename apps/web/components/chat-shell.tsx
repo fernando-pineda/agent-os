@@ -2,14 +2,17 @@
 
 import { MenuIcon, PanelLeftCloseIcon } from 'lucide-react';
 import { useState } from 'react';
-import { useAgentSelection } from '@/components/agent-context';
+import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { AgentsPanel } from '@/components/agents-panel';
 import { Thread } from '@/components/assistant-ui/thread';
 import { Button } from '@/components/ui/button';
+import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import { RuntimeProvider } from '@/lib/runtime';
 
 export function ChatShell() {
   const { selectedAgentId } = useAgentSelection();
+  const agents = useAgentsFeed();
+  const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -60,14 +63,34 @@ export function ChatShell() {
       {/* Main thread area: keyed by agent so each agent has one chat */}
       <main className="flex flex-1 flex-col overflow-hidden md:ml-0">
         <div className="flex-1 overflow-hidden">
-          {selectedAgentId ? (
-            <RuntimeProvider key={selectedAgentId} agentId={selectedAgentId}>
-              <Thread />
-            </RuntimeProvider>
-          ) : (
+          {!selectedAgentId ? (
             <div className="flex h-full items-center justify-center text-sm text-zinc-600">
               Pick an agent from the sidebar
             </div>
+          ) : selectedAgent?.status === 'stopped' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-4">
+              {selectedAgent.avatar ? (
+                <div
+                  className="size-20 rounded-2xl"
+                  style={{
+                    background: avatarTileBackground(
+                      selectedAgent.avatar.color,
+                    ),
+                  }}
+                >
+                  <img
+                    src={avatarImagePath(selectedAgent.avatar.character)}
+                    alt=""
+                    className="size-full object-contain p-2 grayscale"
+                  />
+                </div>
+              ) : null}
+              <p className="text-sm text-zinc-500">Your agent is turned off.</p>
+            </div>
+          ) : (
+            <RuntimeProvider key={selectedAgentId} agentId={selectedAgentId}>
+              <Thread />
+            </RuntimeProvider>
           )}
         </div>
       </main>

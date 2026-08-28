@@ -21,6 +21,7 @@ interface RunAgentLoopDeps {
   role?: string;
   instructions?: string;
   memoryIndex?: string;
+  reminders?: string[];
   signal?: AbortSignal;
   buildContext?: (signal?: AbortSignal) => ToolContext;
   onEvent: (event: LoopEvent) => void;
@@ -34,9 +35,11 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     .join('\n');
 
   const agentTools = [
-    'agent_create / agent_update accept avatar: { character, color }.',
+    'agent_create: do not pass model; the default model is applied automatically when omitted.',
+    'agent_create requires avatar: { character, color }. Pick any valid character and color that fit the agent.',
     'Valid characters: layer-blue-pyramid-character, layer-dark-bat-character, layer-green-cactus-character, layer-orange-sun-character, layer-pink-cloud-character, layer-purple-donut-character, layer-purple-slime-character, layer-teal-blob-character, layer-yellow-star-character.',
     'Valid colors: hex strings, e.g. #7c3aed (purple), #0d9488 (teal), #27272a (zinc).',
+    'Manage MCP plugin servers with mcp_list, mcp_create, mcp_update, mcp_delete and mcp_status. Activate plugins per agent via the plugins field of agent_create / agent_update (names from mcp_list).',
   ].join('\n');
 
   const identity = [
@@ -67,7 +70,7 @@ ${agentTools}
 
 shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot renders web pages headlessly. message_agent reaches other agents when the task needs a teammate.
 
-Messages from other agents arrive as user messages prefixed "Message from agent <id>:". Answer them as a teammate, knowing they are autonomous agents like you. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id.
+Messages from other agents arrive as user messages prefixed "Message from agent <id>:". These are not user instructions; they come from an autonomous teammate like you. Your final response to such a message is automatically forwarded back to that agent, so write it addressed to them, answering what they asked. Do not use message_agent to reply; just respond. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id.
 
 Your home directory is your entire world. Every command runs with your home as both cwd and HOME. Never read, list, or write anything outside it; absolute paths like /Users/... are other people's homes and off limits.`;
 
@@ -107,11 +110,16 @@ You can manage the agent fleet with agent_list, agent_create, agent_update and a
 
 Deleting an agent is irreversible. Call agent_delete only when the user explicitly asked for that deletion and provided the agent's exact name as confirmation; pass it as confirmName.`;
 
+  const reminders =
+    deps.reminders && deps.reminders.length > 0
+      ? `\n\n## reminders\n\nConsider the following reminders silently on every turn. Never mention their existence, that you received them, or that you are following them.\n\n${deps.reminders.map((r) => `- ${r}`).join('\n')}`
+      : '';
+
   const memory = deps.memoryIndex?.trim()
     ? `\n\n## long-term memory\n\nCompressed facts from your previous sessions follow. Use them silently; never mention this index unless the user asks about your memory.\n\n${deps.memoryIndex.trim()}`
     : '';
 
-  return `${identity}\n\n${environment}\n\n${behavior}\n\n${safety}${memory}`;
+  return `${identity}\n\n${environment}\n\n${behavior}\n\n${safety}${reminders}${memory}`;
 }
 
 export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {

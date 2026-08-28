@@ -1,7 +1,7 @@
 'use client';
 
 import type { DataMessagePartProps } from '@assistant-ui/react';
-import { ArrowRightIcon, MailIcon } from 'lucide-react';
+import { ArrowRightIcon, MailIcon, UserIcon } from 'lucide-react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import type { AgentInfo } from '@/lib/types';
@@ -11,18 +11,20 @@ type MessageAgentData = {
   state: 'sending' | 'sent' | 'failed';
 };
 
-function AgentAvatarTile({
-  agent,
-  size,
-}: {
-  agent: AgentInfo | undefined;
-  size: 'sm' | 'md';
-}) {
-  if (!agent?.avatar) return null;
-  const dimension = size === 'sm' ? 'size-5' : 'size-6';
+function AgentAvatarTile({ agent }: { agent: AgentInfo | undefined }) {
+  if (!agent?.avatar) {
+    return (
+      <div className="flex size-6 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50">
+        <UserIcon
+          className="size-3.5 text-muted-foreground"
+          aria-hidden="true"
+        />
+      </div>
+    );
+  }
   return (
     <div
-      className={`${dimension} shrink-0 rounded-lg`}
+      className="size-6 shrink-0 rounded-lg"
       style={{ background: avatarTileBackground(agent.avatar.color) }}
     >
       <img
@@ -50,13 +52,13 @@ export const MessageAgentChip = ({ data }: DataMessagePartProps<unknown>) => {
         : `Sent message to ${recipientName}`;
 
   return (
-    <div className="flex justify-center py-1">
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 px-3 py-1 text-xs text-muted-foreground">
-        <AgentAvatarTile agent={sender} size="sm" />
+    <div className="flex flex-col items-center gap-1 py-1">
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+        <AgentAvatarTile agent={sender} />
         <ArrowRightIcon className="size-3.5" aria-hidden="true" />
-        <AgentAvatarTile agent={recipient} size="sm" />
-        {label}
+        <AgentAvatarTile agent={recipient} />
       </span>
+      <span className="text-xs text-muted-foreground">{label}</span>
     </div>
   );
 };
@@ -79,7 +81,7 @@ export const InboxAgentChip = ({ data }: DataMessagePartProps<unknown>) => {
   return (
     <div className="flex justify-center py-1">
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 px-3 py-1 text-xs text-muted-foreground">
-        <AgentAvatarTile agent={sender} size="sm" />
+        <AgentAvatarTile agent={sender} />
         <MailIcon className="size-3.5" aria-hidden="true" />
         {label}
       </span>

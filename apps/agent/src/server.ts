@@ -22,6 +22,7 @@ import {
 } from 'assistant-stream';
 import type { ReadonlyJSONValue } from 'assistant-stream/utils';
 import { loadMemoryIndex } from './compact.js';
+import { appendOutbox, deliverWithRetry, removeOutbox } from './outbox.js';
 import { findPortFor, myPort } from './registry.js';
 import {
   loadThread,
@@ -448,21 +449,33 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       return;
     }
 
-    try {
-      const port = await findPortFor(body.replyTo);
-      if (!port) return;
-      await fetch(`http://localhost:${port}/inbox`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          fromAgentId: serverDeps.agentId,
-          message: text,
-          inReplyTo: body.taskId,
-        }),
+    const outboxEntry = {
+      toAgentId: body.replyTo,
+      message: text,
+      inReplyTo: body.taskId,
+      ts: Date.now(),
+    };
+    await appendOutbox(serverDeps.homeDir, outboxEntry);
+
+    void deliverWithRetry(
+      serverDeps.agentId,
+      outboxEntry.toAgentId,
+      outboxEntry.message,
+      outboxEntry.inReplyTo,
+    )
+      .then(async (ok) => {
+        if (ok) {
+          await removeOutbox(serverDeps.homeDir, outboxEntry);
+          return;
+        }
+        console.error(
+          'Inbox reply callback failed after all retries',
+          outboxEntry,
+        );
+      })
+      .catch((err) => {
+        console.error('Inbox reply callback failed', err);
       });
-    } catch (err) {
-      console.error('Inbox reply callback failed', err);
-    }
   }
 }
 

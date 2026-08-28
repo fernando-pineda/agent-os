@@ -13,6 +13,7 @@ import { wrapWithSandbox } from '@agent-os/sandbox';
 import { defaultTools, TmuxSession } from '@agent-os/tools';
 import { scheduleCompaction } from './compact.js';
 import { loadAgentConfig } from './config.js';
+import { drainOutbox } from './outbox.js';
 import { createAgentServer, sendAgentMessageHttp } from './server.js';
 
 const rawAgentId = process.argv[2] ?? process.env.AGENT_ID;
@@ -90,6 +91,10 @@ async function main(): Promise<void> {
   const port = await server.start();
   console.log(`Agent HTTP server listening on http://localhost:${port}`);
 
+  void drainOutbox(homeDir, agentId).catch((err) => {
+    console.error('Failed to drain outbox on startup', err);
+  });
+
   process.on('SIGTERM', () => {
     stopCompaction();
     void shutdown(server);
@@ -136,6 +141,7 @@ function buildContext(
     workspace,
     homeDir,
     signal,
+    group: agent.group,
     env: buildEnv(agent),
     sendAgentMessage: sendAgentMessageHttp,
   };
