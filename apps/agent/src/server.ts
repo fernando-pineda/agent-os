@@ -22,7 +22,7 @@ import {
 } from 'assistant-stream';
 import type { ReadonlyJSONValue } from 'assistant-stream/utils';
 import { loadMemoryIndex } from './compact.js';
-import { myPort, readRegistry } from './registry.js';
+import { findPortFor, myPort } from './registry.js';
 import {
   loadThread,
   loadUsage,
@@ -159,19 +159,38 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           fromAgentId?: string;
           taskId?: string;
           message?: string;
+          replyTo?: string;
+          inReplyTo?: string;
         };
+        if (running) {
+          res.writeHead(409, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Agent is busy' }));
+          return;
+        }
         const fromAgentId =
           typeof body.fromAgentId === 'string' ? body.fromAgentId : 'unknown';
         const taskId =
           typeof body.taskId === 'string' ? body.taskId : crypto.randomUUID();
         const message = typeof body.message === 'string' ? body.message : '';
-        const reply = await handleInbox(fromAgentId, taskId, message, deps, {
+        const replyTo =
+          typeof body.replyTo === 'string' ? body.replyTo : fromAgentId;
+        const inboxBody: {
+          fromAgentId: string;
+          taskId: string;
+          message: string;
+          replyTo: string;
+          inReplyTo?: string;
+        } = { fromAgentId, taskId, message, replyTo };
+        if (typeof body.inReplyTo === 'string') {
+          inboxBody.inReplyTo = body.inReplyTo;
+        }
+        const result = await handleInbox(inboxBody, deps, {
           setStatus,
           setCurrentTaskId,
           markRunning,
         });
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ reply }));
+        res.writeHead(202, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
         return;
       }
 
@@ -299,28 +318,59 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   }
 
   async function handleInbox(
-    fromAgentId: string,
-    taskId: string,
-    message: string,
+    body: {
+      fromAgentId: string;
+      taskId: string;
+      message: string;
+      replyTo: string;
+      inReplyTo?: string;
+    },
     serverDeps: ServerDeps,
     controls: RunControls,
-  ): Promise<string> {
-    controls.setCurrentTaskId(taskId);
+  ): Promise<{ accepted: true; id: string }> {
+    controls.setCurrentTaskId(body.taskId);
     controls.setStatus('busy');
     controls.markRunning(true);
     runningController = new AbortController();
 
+    const prefix = body.inReplyTo ? 'Reply from agent' : 'Message from agent';
     const chatMessages: ChatMessage[] = [
       {
         role: 'user',
-        content: `Message from agent ${fromAgentId}: ${message}`,
+        content: `${prefix} ${body.fromAgentId}: ${body.message}`,
       },
     ];
 
+    const controller = runningController;
+
+    void processInbox(
+      body,
+      chatMessages,
+      serverDeps,
+      controls,
+      controller,
+    ).catch((err) => console.error('Inbox task failed', err));
+
+    return { accepted: true, id: serverDeps.agentId };
+  }
+
+  async function processInbox(
+    body: {
+      fromAgentId: string;
+      taskId: string;
+      message: string;
+      replyTo: string;
+      inReplyTo?: string;
+    },
+    chatMessages: ChatMessage[],
+    serverDeps: ServerDeps,
+    controls: RunControls,
+    controller: AbortController,
+  ): Promise<void> {
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
     const replyParts: string[] = [];
-    const controller = runningController;
+    let text = '';
 
     try {
       await runAgentLoop({
@@ -339,15 +389,40 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           handleStreamEvent(event, undefined, toolContexts, segments);
         },
       });
-      const text = replyParts.join('');
+      text = replyParts.join('');
       await persistTurn([], segments, serverDeps);
-      return text;
     } catch (err) {
-      return err instanceof Error ? err.message : String(err);
+      console.error('Inbox loop error', err);
+      text = err instanceof Error ? err.message : String(err);
     } finally {
       controls.setStatus('online');
       controls.setCurrentTaskId(undefined);
       controls.markRunning(false);
+    }
+
+    if (
+      !text ||
+      !body.replyTo ||
+      body.replyTo === 'unknown' ||
+      body.inReplyTo
+    ) {
+      return;
+    }
+
+    try {
+      const port = await findPortFor(body.replyTo);
+      if (!port) return;
+      await fetch(`http://localhost:${port}/inbox`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          fromAgentId: serverDeps.agentId,
+          message: text,
+          inReplyTo: body.taskId,
+        }),
+      });
+    } catch (err) {
+      console.error('Inbox reply callback failed', err);
     }
   }
 }
@@ -473,23 +548,31 @@ export async function sendAgentMessageHttp(
   toAgentId: string,
   message: string,
 ): Promise<string> {
-  const registry = await readRegistry();
-  const entry = registry.agents.find((a) => a.id === toAgentId);
-  if (!entry) {
-    throw new Error(`Agent ${toAgentId} not found in registry`);
+  const port = await findPortFor(toAgentId);
+  if (!port) {
+    return `Agent ${toAgentId} is unreachable (not running?).`;
   }
-  const res = await fetch(`http://localhost:${entry.port}/inbox`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      fromAgentId: process.env.AGENT_ID ?? 'unknown',
-      taskId: crypto.randomUUID(),
-      message,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Agent ${toAgentId} inbox returned ${res.status}`);
+
+  try {
+    const res = await fetch(`http://localhost:${port}/inbox`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        fromAgentId: process.env.AGENT_ID ?? 'unknown',
+        taskId: crypto.randomUUID(),
+        message,
+        replyTo: process.env.AGENT_ID ?? 'unknown',
+      }),
+    });
+
+    if (res.status === 409) {
+      return `Agent ${toAgentId} is busy with another task; your message was not delivered. Try again later.`;
+    }
+    if (!res.ok) {
+      return `Agent ${toAgentId} is unreachable (not running?).`;
+    }
+    return `Message delivered to ${toAgentId}. They will reply when done.`;
+  } catch {
+    return `Agent ${toAgentId} is unreachable (not running?).`;
   }
-  const body = (await res.json()) as { reply?: string };
-  return body.reply ?? '';
 }

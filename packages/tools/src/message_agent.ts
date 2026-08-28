@@ -3,7 +3,8 @@ import type { Tool, ToolContext, ToolResult } from '@agent-os/core';
 export const messageAgent: Tool = {
   spec: {
     name: 'message_agent',
-    description: "Send a message to another agent's inbox and return its reply",
+    description:
+      "Send a message to another agent and continue without waiting. The other agent's reply arrives later as an inbound message to your inbox.",
     parameters: {
       type: 'object',
       properties: {
@@ -26,8 +27,8 @@ export const messageAgent: Tool = {
     }
 
     try {
-      const reply = await ctx.sendAgentMessage(toAgentId, message);
-      return { ok: true, output: reply };
+      const confirmation = await ctx.sendAgentMessage(toAgentId, message);
+      return { ok: true, output: confirmation };
     } catch (err) {
       return {
         ok: false,
