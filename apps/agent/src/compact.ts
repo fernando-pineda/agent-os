@@ -13,9 +13,13 @@ import {
   uiMessagesToChat,
 } from './thread.js';
 
-export const COMPACT_IDLE_MS = Number(process.env.AGENT_OS_COMPACT_IDLE_MS ?? 5 * 60 * 1000);
+export const COMPACT_IDLE_MS = Number(
+  process.env.AGENT_OS_COMPACT_IDLE_MS ?? 5 * 60 * 1000,
+);
 export const KEEP_RECENT_MESSAGES = 12;
-export const MIN_MESSAGES_TO_COMPACT = Number(process.env.AGENT_OS_COMPACT_MIN ?? 20);
+export const MIN_MESSAGES_TO_COMPACT = Number(
+  process.env.AGENT_OS_COMPACT_MIN ?? 20,
+);
 
 export function memoryIndexPath(homeDir: string): string {
   return join(homeDir, 'memory', 'index.md');
