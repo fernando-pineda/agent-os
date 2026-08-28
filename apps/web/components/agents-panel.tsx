@@ -70,6 +70,72 @@ function avatarImagePath(character: string): string {
   return `/characters/${character}.png`;
 }
 
+// Tile background: vertical gradient from a lightened top to the picked color.
+function avatarTileBackground(color: string): string {
+  const n = parseInt(color.slice(1), 16);
+  const r = Math.min(255, ((n >> 16) & 0xff) + 56);
+  const g = Math.min(255, ((n >> 8) & 0xff) + 56);
+  const b = Math.min(255, (n & 0xff) + 56);
+  return `linear-gradient(135deg, rgb(${r}, ${g}, ${b}) 0%, ${color} 65%)`;
+}
+
+function AvatarPicker({
+  character,
+  color,
+  onCharacter,
+  onColor,
+}: {
+  character: string;
+  color: string;
+  onCharacter: (c: string) => void;
+  onColor: (c: string) => void;
+}) {
+  return (
+    <>
+      <div>
+        <label className="mb-1.5 block text-xs text-zinc-400">Character</label>
+        <div className="grid grid-cols-5 gap-2">
+          {AGENT_CHARACTERS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onCharacter(c)}
+              className={`rounded-xl p-1.5 transition-all ${
+                character === c ? 'ring-2 ring-zinc-400' : 'hover:bg-white/5'
+              }`}
+              style={{ background: avatarTileBackground(color) }}
+              aria-label={`Select character ${c}`}
+            >
+              <img
+                src={avatarImagePath(c)}
+                alt=""
+                className="size-full object-contain"
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs text-zinc-400">Color</label>
+        <div className="flex gap-2">
+          {AGENT_AVATAR_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onColor(c)}
+              className={`size-6 rounded-md ${
+                color === c ? 'ring-2 ring-white' : ''
+              }`}
+              style={{ background: avatarTileBackground(c) }}
+              aria-label={`Select color ${c}`}
+            />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
@@ -194,6 +260,10 @@ export function AgentsPanel() {
   const [editWorkspace, setEditWorkspace] = useState('');
   const [editRole, setEditRole] = useState('');
   const [editModel, setEditModel] = useState('');
+  const [editCharacter, setEditCharacter] = useState<string>(
+    AGENT_CHARACTERS[0],
+  );
+  const [editColor, setEditColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -204,6 +274,8 @@ export function AgentsPanel() {
     setEditWorkspace(agent.workspace);
     setEditRole(agent.role ?? '');
     setEditModel(agent.model);
+    setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
+    setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
     setEditError('');
   }, []);
 
@@ -223,6 +295,7 @@ export function AgentsPanel() {
         workspace: editWorkspace.trim() || undefined,
         role: editRole.trim() || undefined,
         model: editModel.trim() || undefined,
+        avatar: { character: editCharacter, color: editColor },
       });
       closeEditDialog();
     } catch (err) {
@@ -239,6 +312,8 @@ export function AgentsPanel() {
     editWorkspace,
     editRole,
     editModel,
+    editCharacter,
+    editColor,
     closeEditDialog,
   ]);
 
@@ -315,47 +390,12 @@ export function AgentsPanel() {
                 <label className="mb-1.5 block text-xs text-zinc-400">
                   Character
                 </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {AGENT_CHARACTERS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setCharacter(c)}
-                      className={`rounded-xl p-1.5 transition-all ${
-                        character === c
-                          ? 'ring-2 ring-zinc-400'
-                          : 'hover:bg-white/5'
-                      }`}
-                      style={{ backgroundColor: color }}
-                      aria-label={`Select character ${c}`}
-                    >
-                      <img
-                        src={avatarImagePath(c)}
-                        alt=""
-                        className="size-full object-contain"
-                      />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs text-zinc-400">
-                  Color
-                </label>
-                <div className="flex gap-2">
-                  {AGENT_AVATAR_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setColor(c)}
-                      className={`size-6 rounded-md ${
-                        color === c ? 'ring-2 ring-white' : ''
-                      }`}
-                      style={{ backgroundColor: c }}
-                      aria-label={`Select color ${c}`}
-                    />
-                  ))}
-                </div>
+                <AvatarPicker
+                  character={character}
+                  color={color}
+                  onCharacter={setCharacter}
+                  onColor={setColor}
+                />
               </div>
               <Button
                 onClick={onCreate}
@@ -392,44 +432,51 @@ export function AgentsPanel() {
                     />
                   }
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {agent.avatar ? (
+                  <div className="flex items-center gap-2.5">
+                    {agent.avatar ? (
+                      // Dot sits outside the clipped tile so it stays visible.
+                      <div className="relative shrink-0 p-0.5">
                         <div
-                          className="relative size-10 shrink-0 rounded-xl overflow-hidden"
-                          style={{ backgroundColor: agent.avatar.color }}
+                          className="size-10 rounded-xl"
+                          style={{
+                            background: avatarTileBackground(
+                              agent.avatar.color,
+                            ),
+                          }}
                         >
                           <img
                             src={avatarImagePath(agent.avatar.character)}
                             alt=""
                             className="size-full object-contain p-1"
                           />
-                          <span
-                            className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-zinc-900 ${statusColor(
-                              agent.status,
-                            )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
-                          />
                         </div>
-                      ) : null}
-                      <span className="truncate text-sm font-medium text-zinc-200">
+                        <span
+                          className={`absolute bottom-0 right-0 size-2.5 rounded-full ring-2 ring-zinc-900 ${statusColor(
+                            agent.status,
+                          )} ${isPulsing(agent.status) ? 'status-pulse' : ''}`}
+                        />
+                      </div>
+                    ) : null}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-zinc-200">
                         {agent.name}
-                      </span>
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
+                        {agent.group && (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
+                            {agent.group}
+                          </span>
+                        )}
+                        {agent.workspace !== agent.id && (
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-400">
+                            {agent.workspace}
+                          </span>
+                        )}
+                        <span className="font-mono">
+                          {truncateModel(agent.model)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
-                    {agent.group && (
-                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
-                        {agent.group}
-                      </span>
-                    )}
-                    {agent.workspace !== agent.id && (
-                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-zinc-400">
-                        {agent.workspace}
-                      </span>
-                    )}
-                    <span className="font-mono">
-                      {truncateModel(agent.model)}
-                    </span>
                   </div>
                   {agent.currentTaskId && (
                     <div className="mt-1 text-xs text-zinc-500">
@@ -557,6 +604,12 @@ export function AgentsPanel() {
               loading={loadingModels}
               allowManual={models.length === 0}
               placeholder="Default"
+            />
+            <AvatarPicker
+              character={editCharacter}
+              color={editColor}
+              onCharacter={setEditCharacter}
+              onColor={setEditColor}
             />
             {editError && (
               <div className="text-xs text-destructive">{editError}</div>
