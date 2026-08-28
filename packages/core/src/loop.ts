@@ -17,15 +17,40 @@ interface RunAgentLoopDeps {
   tools: Tool[];
   model: string;
   messages: ChatMessage[];
+  agentId?: string;
+  role?: string;
   signal?: AbortSignal;
   onEvent: (event: LoopEvent) => void;
+}
+
+function buildSystemPrompt(deps: RunAgentLoopDeps): string {
+  const toolNames = deps.tools.map((t) => t.spec.name).join(', ');
+  const identity = [
+    'You are an autonomous macOS agent in the agent-os system.',
+    deps.agentId ? `Your id is "${deps.agentId}".` : '',
+    deps.role ? `Your responsibility in the team is: ${deps.role}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const capabilities = `You operate on a real macOS machine with these tools: ${toolNames}. Shell commands run in your own home directory, which is fully yours: clone repos, write files, install things there. You can message other agents with message_agent when a task needs a teammate.`;
+
+  const behavior = [
+    'Work with tools, not with descriptions of what you would do. If the task needs a command, run it.',
+    'Prefer one precise tool call over a long explanation. Report results in one or two sentences after acting.',
+    'Never invent command output. If a tool fails, read the error and adapt.',
+    'Stay inside your home directory unless the task explicitly requires otherwise.',
+    'Answer in the same language the user writes in.',
+  ].join(' ');
+
+  return `${identity}\n\n${capabilities}\n\n${behavior}`;
 }
 
 export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {
   const messages: ChatMessage[] = [...deps.messages];
   const systemMessage: ChatMessage = {
     role: 'system',
-    content: `You are agent-os, a macOS AI agent. Current working directory is the agent home directory.`,
+    content: buildSystemPrompt(deps),
   };
 
   const hasSystem = messages.some((m) => m.role === 'system');

@@ -234,6 +234,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             tools: serverDeps.tools,
             model: serverDeps.model,
             messages: chatMessages,
+            agentId: serverDeps.agentId,
+            ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
             signal: controller.signal,
             onEvent: (event: LoopEvent) => {
               handleStreamEvent(
@@ -304,6 +306,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         tools: serverDeps.tools,
         model: serverDeps.model,
         messages: chatMessages,
+        agentId: serverDeps.agentId,
+        ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {
           if (event.type === 'text-delta') {
