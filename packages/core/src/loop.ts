@@ -149,7 +149,7 @@ export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {
         _done = true;
         _usage = event.usage;
       } else if (event.type === 'error') {
-        return;
+        throw new Error(event.error);
       }
     }
 

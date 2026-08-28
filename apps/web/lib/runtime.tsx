@@ -534,8 +534,13 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
         if ((current.toolParts?.length ?? 0) > 0) {
           startNew();
         }
-        current.text += `\nError: ${err instanceof Error ? err.message : String(err)}`;
+        if (!current.text) {
+          current.text = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        } else {
+          current.text += `\n\nError: ${err instanceof Error ? err.message : String(err)}`;
+        }
         pushCurrent();
+        clearLivePreview(agentId);
       } finally {
         setIsRunning(false);
         clearLivePreview(agentId);
