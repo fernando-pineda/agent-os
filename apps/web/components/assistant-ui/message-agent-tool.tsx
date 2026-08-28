@@ -1,59 +1,22 @@
 'use client';
 
-import type { ToolCallMessagePartProps } from '@assistant-ui/react';
+import type { DataMessagePartProps } from '@assistant-ui/react';
 import { SendIcon } from 'lucide-react';
 
-type MessageAgentArgs = {
-  toAgentId?: string;
+type MessageAgentData = {
+  toAgentId: string;
+  state: 'sending' | 'sent' | 'failed';
 };
 
-function getToAgentId(
-  args: MessageAgentArgs,
-  argsText: string,
-): string | undefined {
-  if (args.toAgentId) return args.toAgentId;
-  try {
-    const parsed = JSON.parse(argsText) as unknown;
-    if (parsed && typeof parsed === 'object' && 'toAgentId' in parsed) {
-      return String((parsed as MessageAgentArgs).toAgentId);
-    }
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
-function isFailedResult(isError: boolean, result?: unknown): boolean {
-  if (isError) return true;
-  if (typeof result !== 'string' || !result) return false;
-  const lower = result.toLowerCase();
-  return (
-    lower.startsWith('agent') ||
-    lower.startsWith('busy') ||
-    lower.startsWith('unreachable')
-  );
-}
-
-export const MessageAgentTool = ({
-  args,
-  argsText,
-  status,
-  isError,
-  result,
-}: ToolCallMessagePartProps<MessageAgentArgs, unknown>) => {
-  const toAgentId = getToAgentId(args, argsText ?? '');
-  const target = toAgentId ?? 'agent';
-  const running = status?.type === 'running';
-  const failed = isFailedResult(Boolean(isError), result);
-
-  let label: string;
-  if (running) {
-    label = `Sending a message to ${target}...`;
-  } else if (failed) {
-    label = `Message to ${target} failed`;
-  } else {
-    label = `I sent a message to ${target}`;
-  }
+export const MessageAgentChip = ({ data }: DataMessagePartProps<unknown>) => {
+  const d = data as MessageAgentData | undefined;
+  const target = d?.toAgentId || 'agent';
+  const label =
+    d?.state === 'sending'
+      ? `Sending a message to ${target}...`
+      : d?.state === 'failed'
+        ? `Message to ${target} failed`
+        : `I sent a message to ${target}`;
 
   return (
     <div className="flex justify-center py-1">
@@ -63,10 +26,4 @@ export const MessageAgentTool = ({
       </span>
     </div>
   );
-};
-
-export const messageAgentToolkit = {
-  message_agent: {
-    render: MessageAgentTool,
-  },
 };

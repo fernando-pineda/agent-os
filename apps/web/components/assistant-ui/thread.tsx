@@ -57,7 +57,7 @@ import { File } from '@/components/assistant-ui/file';
 import { ThreadFollowupSuggestions } from '@/components/assistant-ui/follow-up-suggestions';
 import { Image } from '@/components/assistant-ui/image';
 import { MarkdownText } from '@/components/assistant-ui/markdown-text';
-import { MessageAgentTool } from '@/components/assistant-ui/message-agent-tool';
+import { MessageAgentChip } from '@/components/assistant-ui/message-agent-tool';
 import {
   Reasoning,
   ReasoningContent,
@@ -525,13 +525,13 @@ const AssistantMessage: FC = () => {
               case 'reasoning':
                 return <Reasoning {...part} />;
               case 'tool-call':
-                return part.toolName === 'message_agent' ? (
-                  <MessageAgentTool {...part} />
-                ) : (
-                  (part.toolUI ?? <ToolFallbackComponent {...part} />)
-                );
+                return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case 'data':
-                return part.dataRendererUI;
+                return part.name === 'message-agent' ? (
+                  <MessageAgentChip {...part} />
+                ) : (
+                  part.dataRendererUI
+                );
               case 'file':
                 return (
                   <div data-slot="aui_assistant-message-file" className="py-1">
