@@ -512,9 +512,9 @@ async function persistTurn(
   const storedIds = new Set(
     stored.map((m) => m.id).filter((id): id is string => Boolean(id)),
   );
-  const incoming = existingMessages.filter(
-    (m) => !m.id || !storedIds.has(m.id),
-  );
+  const incoming = existingMessages
+    .filter((m) => !m.id || !storedIds.has(m.id))
+    .map((m) => (m.id ? m : { ...m, id: crypto.randomUUID() }));
   const messages = [...stored, ...incoming];
 
   // Group segments into messages: a tool call starts a new message;

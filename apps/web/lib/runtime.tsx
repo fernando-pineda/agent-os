@@ -93,22 +93,31 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
       status: { type: 'complete', reason: 'stop' } as const,
     }),
     createdAt: new Date(),
-    // Do not concat consecutive assistant messages; each is its own bubble.
-    convertConfig: { joinStrategy: 'none' as const },
-  } as ThreadMessageLike & {
-    convertConfig: { joinStrategy: 'none' };
   };
 }
 
 function extractText(parts: unknown): string {
   if (!Array.isArray(parts)) return '';
-  return parts
-    .map((p) =>
+  const out: string[] = [];
+  let prevWasTool = false;
+  for (const p of parts) {
+    const isTool =
+      p && typeof p === 'object' && (p as { type?: string }).type === 'tool-call';
+    if (isTool) {
+      prevWasTool = true;
+      continue;
+    }
+    const text =
       p && typeof p === 'object' && 'text' in p
         ? String((p as { text?: unknown }).text ?? '')
-        : '',
-    )
-    .join('');
+        : '';
+    if (text) {
+      // Separate text that follows a tool call with a blank line.
+      out.push(prevWasTool ? `\n\n${text}` : text);
+      prevWasTool = false;
+    }
+  }
+  return out.join('');
 }
 
 function extractToolParts(parts: unknown): ToolPart[] {
