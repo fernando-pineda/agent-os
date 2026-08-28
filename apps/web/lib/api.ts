@@ -4,12 +4,13 @@ import type {
   AgentsResponse,
   CreateAgentPayload,
   GlobalConfigStatus,
+  McpServerConfig,
+  McpServersResponse,
+  McpStatusResponse,
   ModelItem,
   ModelsResponse,
   OnboardingPayload,
   OnboardingStatus,
-  PluginInfo,
-  PluginsResponse,
   UpdateAgentPayload,
   UpdateConfigPayload,
 } from '@/lib/types';
@@ -80,15 +81,26 @@ export async function createAgent(
 }
 
 export async function startAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/start`, {
-    method: 'POST',
-  });
+  const res = await fetch(
+    `${BASE}/api/agents/${encodeURIComponent(id)}/start`,
+    {
+      method: 'POST',
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Start failed: HTTP ${res.status}: ${text}`);
+  }
 }
 
 export async function stopAgent(id: string): Promise<void> {
-  await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/stop`, {
+  const res = await fetch(`${BASE}/api/agents/${encodeURIComponent(id)}/stop`, {
     method: 'POST',
   });
+  if (!res.ok) {
+    const text = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Stop failed: HTTP ${res.status}: ${text}`);
+  }
 }
 
 export async function deleteAgent(
@@ -133,9 +145,43 @@ export async function getMessages(agentId: string): Promise<UIMessage[]> {
   return res.json();
 }
 
-export async function getPlugins(): Promise<PluginInfo[]> {
-  const res = await fetchJson<PluginsResponse>(`${BASE}/api/plugins`);
-  return res.plugins;
+export async function getMcpServers(): Promise<McpServerConfig[]> {
+  const res = await fetchJson<McpServersResponse>(`${BASE}/api/mcp`);
+  return res.servers;
+}
+
+export async function getMcpStatuses(): Promise<McpStatusResponse> {
+  return fetchJson<McpStatusResponse>(`${BASE}/api/mcp/status`);
+}
+
+export async function createMcpServer(
+  server: McpServerConfig,
+): Promise<McpServerConfig> {
+  return fetchJson<McpServerConfig>(`${BASE}/api/mcp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(server),
+  });
+}
+
+export async function updateMcpServer(
+  name: string,
+  patch: Partial<McpServerConfig>,
+): Promise<McpServerConfig> {
+  return fetchJson<McpServerConfig>(
+    `${BASE}/api/mcp/${encodeURIComponent(name)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export async function deleteMcpServer(name: string): Promise<void> {
+  await fetchJson(`${BASE}/api/mcp/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function getConfig(): Promise<GlobalConfigStatus> {

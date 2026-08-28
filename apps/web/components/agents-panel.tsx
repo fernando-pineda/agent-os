@@ -446,6 +446,7 @@ function GroupSection({
 
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
+  const { patchAgentStatus } = useAgentSelection();
   const agents = useAgentsFeed();
   const { groups, refreshGroups } = useGroupsFeed();
   const [models, setModels] = useState<ModelItem[]>([]);
@@ -538,17 +539,22 @@ export function AgentsPanel() {
     [refreshGroups],
   );
 
-  const toggleStartStop = useCallback(async (agent: AgentInfo) => {
-    try {
-      if (agent.status === 'online' || agent.status === 'busy') {
-        await stopAgent(agent.id);
-      } else {
-        await startAgent(agent.id);
+  const toggleStartStop = useCallback(
+    async (agent: AgentInfo) => {
+      try {
+        if (agent.status === 'online' || agent.status === 'busy') {
+          patchAgentStatus(agent.id, 'stopped');
+          await stopAgent(agent.id);
+        } else {
+          patchAgentStatus(agent.id, 'starting');
+          await startAgent(agent.id);
+        }
+      } catch (err) {
+        console.error(err);
       }
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
+    },
+    [patchAgentStatus],
+  );
 
   // --- Delete dialog state ---
   const [deleteDialog, setDeleteDialog] = useState<AgentInfo | null>(null);

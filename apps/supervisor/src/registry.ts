@@ -36,6 +36,9 @@ export interface RegistryEntry {
   status: AgentStatus;
   lastSeen?: string | undefined;
   currentTaskId?: string | undefined;
+  // Set when the user explicitly requested this agent to stop. Prevents the
+  // health poller from resurrecting a killed process as online.
+  manualStop?: boolean | undefined;
 }
 
 export interface Registry {
@@ -124,6 +127,8 @@ export interface CreateAgentInput {
   sandboxed?: boolean | undefined;
   avatar?: AgentAvatar | undefined;
   instructions?: string | undefined;
+  plugins?: string[] | undefined;
+  reminders?: string[] | undefined;
   git?: {
     userName?: string;
     userEmail?: string;
@@ -159,6 +164,7 @@ export async function updateAgentConfig(
     avatar?: AgentAvatar | undefined;
     instructions?: string | undefined;
     plugins?: string[] | undefined;
+    reminders?: string[] | undefined;
   },
 ): Promise<AgentConfig | null> {
   const config = await readAgentConfig(id);
@@ -173,6 +179,7 @@ export async function updateAgentConfig(
   if (patch.instructions !== undefined)
     config.instructions = patch.instructions;
   if (patch.plugins !== undefined) config.plugins = patch.plugins;
+  if (patch.reminders !== undefined) config.reminders = patch.reminders;
   if (patch.workspace !== undefined) {
     const validationError = validateWorkspace(patch.workspace);
     if (validationError) {
@@ -246,6 +253,8 @@ export async function createAgent(
   if (input.sandboxed) config.sandboxed = input.sandboxed;
   if (input.avatar) config.avatar = input.avatar;
   if (input.instructions) config.instructions = input.instructions;
+  if (input.plugins) config.plugins = input.plugins;
+  if (input.reminders) config.reminders = input.reminders;
   if (input.git) {
     config.git = {
       ...(input.git.userName ? { userName: input.git.userName } : {}),
@@ -295,6 +304,7 @@ export async function startAgent(
   const workspace = config.workspace ?? config.id;
   const entry = getOrCreateEntry(registry, id);
   entry.status = 'starting';
+  entry.manualStop = false;
   await saveRegistry(registry);
   const spawnResult = await spawnAgentProcess(registry, id, workspace);
   if (spawnResult.error) {
@@ -309,19 +319,80 @@ export async function stopAgent(
 ): Promise<AgentInfo | null> {
   const config = await readAgentConfig(id);
   if (!config) return null;
-  const entry = registry.agents.find((a) => a.id === id);
-  if (entry && entry.pid > 0) {
-    try {
-      process.kill(entry.pid, 'SIGTERM');
-      await waitForExit(entry.pid, 5000);
-    } catch {
-      // Process may already be gone
-    }
-    entry.pid = 0;
-    entry.status = 'stopped';
-    await saveRegistry(registry);
+  const entry = getOrCreateEntry(registry, id);
+
+  const pids = await findAgentPids(entry);
+  if (entry.pid > 0) {
+    pids.add(entry.pid);
   }
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process may already be gone.
+    }
+  }
+  for (const pid of pids) {
+    await waitForExit(pid, 5000);
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Process already exited.
+    }
+  }
+
+  try {
+    const hasSession = await runCommand('tmux', [
+      'has-session',
+      '-t',
+      `agent-os-${id}`,
+    ]);
+    if (hasSession) {
+      await runCommand('tmux', ['kill-session', '-t', `agent-os-${id}`]);
+    }
+  } catch {
+    // Session may already be gone.
+  }
+
+  try {
+    await uninstallLaunchdAgent(id);
+  } catch (err) {
+    console.warn(
+      `uninstallLaunchdAgent(${id}) during stop failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  entry.pid = 0;
+  entry.status = 'stopped';
+  entry.manualStop = true;
+  await saveRegistry(registry);
   return toAgentInfo(config, 'stopped', 'unknown');
+}
+
+async function findAgentPids(entry: RegistryEntry): Promise<Set<number>> {
+  const pids = new Set<number>();
+  try {
+    const stdout = await runCommandForOutput('lsof', [
+      '-ti',
+      `tcp:${entry.port}`,
+      '-sTCP:LISTEN',
+    ]);
+    for (const line of stdout.split('\n')) {
+      const pid = Number.parseInt(line.trim(), 10);
+      if (pid > 0 && pid !== process.pid) {
+        pids.add(pid);
+      }
+    }
+  } catch {
+    // lsof may fail when no listener is present.
+  }
+  return pids;
 }
 
 async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
@@ -338,6 +409,41 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runCommand(command: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, (error) => {
+      if (error) {
+        if (error.code === 1) {
+          resolve(false);
+        } else {
+          reject(error);
+        }
+      } else {
+        resolve(true);
+      }
+    });
+    child.unref();
+  });
+}
+
+function runCommandForOutput(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    const child = execFile(command, args, (error, output) => {
+      if (error && error.code !== 0 && error.code !== 1) {
+        reject(error);
+        return;
+      }
+      stdout = output ?? stdout;
+      resolve(stdout);
+    });
+    child.stdout?.on('data', (data) => {
+      stdout += String(data);
+    });
+    child.unref();
+  });
 }
 
 export async function reconcileOnBoot(registry: Registry): Promise<void> {
@@ -525,6 +631,9 @@ export function toAgentInfo(
   }
   if (config.plugins) {
     info.plugins = config.plugins;
+  }
+  if (config.reminders) {
+    info.reminders = config.reminders;
   }
   return info;
 }

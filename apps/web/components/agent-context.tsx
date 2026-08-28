@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
 } from 'react';
 import {
@@ -22,6 +23,7 @@ type AgentContextValue = {
   selectedAgentId: string | null;
   setSelectedAgentId: (id: string | null) => void;
   agents: AgentInfo[];
+  patchAgentStatus: (id: string, status: AgentInfo['status']) => void;
   // Live "thinking" preview per agent while streaming; cleared on finish.
   livePreview: Record<string, string>;
   setLivePreview: (agentId: string, text: string) => void;
@@ -39,6 +41,7 @@ const AgentContext = createContext<AgentContextValue>({
   selectedAgentId: null,
   setSelectedAgentId: () => {},
   agents: [],
+  patchAgentStatus: () => {},
   livePreview: {},
   setLivePreview: () => {},
   clearLivePreview: () => {},
@@ -65,6 +68,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     getModels().then(setModels).catch(console.error);
   }, []);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
+
+  const patchAgentStatus = useCallback(
+    (id: string, status: AgentInfo['status']) => {
+      setAgents((prev) =>
+        prev.map((agent) => (agent.id === id ? { ...agent, status } : agent)),
+      );
+    },
+    [],
+  );
 
   const setUsage = useCallback((agentId: string, u: AgentUsage) => {
     setUsageMap((prev) => ({ ...prev, [agentId]: u }));
@@ -94,25 +106,41 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [refreshGroups]);
 
+  const value = useMemo<AgentContextValue>(
+    () => ({
+      selectedAgentId,
+      setSelectedAgentId: set,
+      agents,
+      patchAgentStatus,
+      livePreview,
+      setLivePreview,
+      clearLivePreview,
+      usage,
+      setUsage,
+      models,
+      groups,
+      refreshGroups,
+      refreshModels,
+    }),
+    [
+      selectedAgentId,
+      set,
+      agents,
+      patchAgentStatus,
+      livePreview,
+      setLivePreview,
+      clearLivePreview,
+      usage,
+      setUsage,
+      models,
+      groups,
+      refreshGroups,
+      refreshModels,
+    ],
+  );
+
   return (
-    <AgentContext.Provider
-      value={{
-        selectedAgentId,
-        setSelectedAgentId: set,
-        agents,
-        livePreview,
-        setLivePreview,
-        clearLivePreview,
-        usage,
-        setUsage,
-        models,
-        groups,
-        refreshGroups,
-        refreshModels,
-      }}
-    >
-      {children}
-    </AgentContext.Provider>
+    <AgentContext.Provider value={value}>{children}</AgentContext.Provider>
   );
 }
 

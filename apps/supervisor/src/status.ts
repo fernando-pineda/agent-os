@@ -118,6 +118,9 @@ export class StatusTrackerImpl implements StatusTracker {
     let changed = false;
     for (const config of configs) {
       const entry = getOrCreateEntry(this.registry, config.id);
+      if (shouldSkipPoll(entry)) {
+        continue;
+      }
       const health = await pollAgent(config, entry.port);
       const existing = this.info.get(config.id);
       const currentStatus = existing?.status ?? 'stopped';
@@ -149,6 +152,13 @@ export class StatusTrackerImpl implements StatusTracker {
       this.notify();
     }
   }
+}
+
+function shouldSkipPoll(entry: {
+  status: AgentStatus;
+  manualStop?: boolean | undefined;
+}): boolean {
+  return entry.status === 'stopped' && Boolean(entry.manualStop);
 }
 
 async function pollAgent(
