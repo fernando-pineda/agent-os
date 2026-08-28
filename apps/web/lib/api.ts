@@ -85,7 +85,6 @@ export async function deleteAgent(
   }
 }
 
-
 export async function updateAgent(
   id: string,
   payload: UpdateAgentPayload,

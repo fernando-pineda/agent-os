@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  PencilIcon,
-  PlayIcon,
-  SquareIcon,
-  Trash2Icon,
-} from 'lucide-react';
+import { PencilIcon, PlayIcon, SquareIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import {
   useAgentSelection,
@@ -407,15 +402,11 @@ export function AgentsPanel() {
                   )}
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                  <ContextMenuItem
-                    onClick={() => openEditDialog(agent)}
-                  >
+                  <ContextMenuItem onClick={() => openEditDialog(agent)}>
                     <PencilIcon className="size-4 text-zinc-400" />
                     Edit
                   </ContextMenuItem>
-                  <ContextMenuItem
-                    onClick={() => void toggleStartStop(agent)}
-                  >
+                  <ContextMenuItem onClick={() => void toggleStartStop(agent)}>
                     {isRunning ? (
                       <>
                         <SquareIcon className="size-4 text-zinc-400" />
@@ -534,11 +525,7 @@ export function AgentsPanel() {
             {editError && (
               <div className="text-xs text-destructive">{editError}</div>
             )}
-            <Button
-              onClick={confirmEdit}
-              disabled={saving}
-              className="w-full"
-            >
+            <Button onClick={confirmEdit} disabled={saving} className="w-full">
               {saving ? 'Saving...' : 'Save changes'}
             </Button>
           </div>
