@@ -5,8 +5,18 @@ import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { useAgentUsage, useLivePreview } from '@/components/agent-context';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import {
+  useAgentsFeed,
+  useAgentUsage,
+  useLivePreview,
+} from '@/components/agent-context';
 import { getMessages, getUsage } from '@/lib/api';
 
 export type RuntimeProviderProps = {
@@ -31,18 +41,20 @@ type Msg = {
   toolParts?: ToolPart[];
   // message_agent calls render as a standalone centered chip message.
   messageAgent?: { toAgentId: string; state: 'sending' | 'sent' | 'failed' };
+  // Inbound agent messages (received via /inbox) render as their own chip.
+  inboxAgent?: { fromAgentId: string; reply: boolean };
 };
 
 function toThreadMessageLike(m: Msg): ThreadMessageLike {
-  if (m.messageAgent) {
+  if (m.messageAgent || m.inboxAgent) {
     return {
       id: m.id,
       role: 'assistant',
       content: [
         {
           type: 'data',
-          name: 'message-agent',
-          data: m.messageAgent,
+          name: m.messageAgent ? 'message-agent' : 'inbox-agent',
+          data: m.messageAgent ?? m.inboxAgent,
         } as never,
       ],
       status: { type: 'complete', reason: 'stop' } as const,
@@ -152,6 +164,22 @@ function extractMessageAgentChips(
   return chips;
 }
 
+const INBOX_RE = /^\[agent-os:inbox from=([^\s\]]+)( reply)?\]/;
+
+// Inbound agent messages get a chip before the (hidden) original text message.
+function extractInboxChip(m: {
+  role: string;
+  parts?: unknown;
+  content?: unknown;
+}): NonNullable<Msg['inboxAgent']> | undefined {
+  if (m.role !== 'user') return undefined;
+  const text =
+    extractText(m.parts) || (m as { content?: string }).content || '';
+  const match = INBOX_RE.exec(typeof text === 'string' ? text : '');
+  if (!match?.[1]) return undefined;
+  return { fromAgentId: match[1], reply: Boolean(match[2]) };
+}
+
 export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -177,6 +205,17 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
             while (seenIds.has(id)) id = `${id}-${i}`;
             seenIds.add(id);
             const out: Msg[] = [];
+            const inboxChip = extractInboxChip(m);
+            if (inboxChip) {
+              // Chip replaces the raw text message; the assistant's reaction follows.
+              out.push({
+                id: `${id}-inbox`,
+                role: 'assistant',
+                text: '',
+                inboxAgent: inboxChip,
+              });
+              return out;
+            }
             const chips = extractMessageAgentChips(m.parts);
             // One chip message per persisted message_agent call.
             chips.forEach((chip, j) => {
@@ -208,6 +247,69 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       cancelled = true;
     };
   }, [agentId, setUsage]);
+
+  // When the SSE feed reports this agent working while the chat is idle,
+  // an inbox message arrived. Re-fetch the thread and surface it as a chip.
+  const agents = useAgentsFeed();
+  const agentStatus = agents.find((a) => a.id === agentId)?.status;
+  const knownIdsRef = useRef<Set<string> | null>(null);
+  const fetchingRef = useRef(false);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const known = knownIdsRef.current;
+    if (known === null) {
+      knownIdsRef.current = new Set(messages.map((m) => m.id));
+      return;
+    }
+    for (const m of messages) known.add(m.id);
+    if (isRunning || fetchingRef.current) return;
+    if (agentStatus !== 'busy' && agentStatus !== 'starting') return;
+    fetchingRef.current = true;
+    getMessages(agentId)
+      .then((ui) => {
+        const additions: Msg[] = [];
+        const seen = new Set(known);
+        ui.forEach((m, i) => {
+          let id = m.id ?? `m-${i}`;
+          while (seen.has(id)) id = `${id}-${i}`;
+          seen.add(id);
+          const inboxChip = extractInboxChip(m);
+          if (inboxChip) {
+            additions.push({
+              id: `${id}-inbox`,
+              role: 'assistant',
+              text: '',
+              inboxAgent: inboxChip,
+            });
+          } else {
+            const text =
+              extractText(m.parts) || (m as { content?: string }).content || '';
+            const toolParts = extractToolParts(m.parts);
+            const chips = extractMessageAgentChips(m.parts);
+            chips.forEach((chip, j) => {
+              additions.push({
+                id: `${id}-chip-${j}`,
+                role: 'assistant',
+                text: '',
+                messageAgent: chip,
+              });
+            });
+            if (text || toolParts.length > 0 || chips.length === 0) {
+              additions.push({ id, role: m.role, text, toolParts });
+            }
+          }
+        });
+        for (const a of additions) known.add(a.id);
+        if (additions.length > 0) {
+          setMessages((prev) => [...prev, ...additions]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        fetchingRef.current = false;
+      });
+  }, [agentStatus, agentId, isRunning, loaded, messages]);
 
   const onNew = useCallback(
     async (message: {

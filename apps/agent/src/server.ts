@@ -337,7 +337,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     const chatMessages: ChatMessage[] = [
       {
         role: 'user',
-        content: `${prefix} ${body.fromAgentId}: ${body.message}`,
+        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}`,
       },
     ];
 
@@ -390,7 +390,24 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         },
       });
       text = replyParts.join('');
-      await persistTurn([], segments, serverDeps);
+      // Persist the inbound message so the UI can surface it and the model
+      // sees it in context after restarts.
+      const inbound: UIMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        parts: [
+          {
+            type: 'text',
+            text: chatMessages[0]?.content ?? '',
+          },
+        ],
+        metadata: {
+          agentOsInbox: true,
+          fromAgentId: body.fromAgentId,
+          ...(body.inReplyTo ? { reply: true } : {}),
+        },
+      };
+      await persistTurn([inbound], segments, serverDeps);
     } catch (err) {
       console.error('Inbox loop error', err);
       text = err instanceof Error ? err.message : String(err);
