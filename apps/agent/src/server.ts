@@ -71,6 +71,16 @@ type NewAssistantPart =
       isError?: boolean;
     };
 
+interface TurnSegment {
+  kind: 'text' | 'tool';
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  isError?: boolean;
+}
+
 interface RunControls {
   setStatus: (status: AgentStatus) => void;
   setCurrentTaskId: (taskId: string | undefined) => void;
@@ -235,8 +245,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
 
     const chatMessages = uiMessagesToChat(messages);
     const toolContexts = new Map<string, ToolCallContext>();
-    const textParts: string[] = [];
-    const newAssistantParts: NewAssistantPart[] = [];
+    const segments: TurnSegment[] = [];
     let lastUsage: { inputTokens: number; outputTokens: number } | undefined;
     const controller = runningController;
 
@@ -261,16 +270,10 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
                   outputTokens: event.usage.completionTokens ?? 0,
                 };
               }
-              handleStreamEvent(
-                event,
-                streamController,
-                toolContexts,
-                newAssistantParts,
-                textParts,
-              );
+              handleStreamEvent(event, streamController, toolContexts, segments);
             },
           });
-          await persistTurn(messages, newAssistantParts, textParts, serverDeps);
+          await persistTurn(messages, segments, serverDeps);
           if (lastUsage) {
             await saveUsage(serverDeps.homeDir, lastUsage);
           }
@@ -321,8 +324,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     ];
 
     const toolContexts = new Map<string, ToolCallContext>();
-    const textParts: string[] = [];
-    const newAssistantParts: NewAssistantPart[] = [];
+    const segments: TurnSegment[] = [];
     const replyParts: string[] = [];
     const controller = runningController;
 
@@ -368,12 +370,16 @@ function handleStreamEvent(
   event: LoopEvent,
   controller: AssistantStreamController | undefined,
   toolContexts: Map<string, ToolCallContext>,
-  newAssistantParts: NewAssistantPart[],
-  textParts: string[],
+  segments: TurnSegment[],
 ): void {
+  const last = segments[segments.length - 1];
   if (event.type === 'text-delta') {
     controller?.appendText(event.delta);
-    textParts.push(event.delta);
+    if (last?.kind === 'text') {
+      last.text = (last.text ?? '') + event.delta;
+    } else {
+      segments.push({ kind: 'text', text: event.delta });
+    }
   } else if (event.type === 'tool-call') {
     const call = event.call;
     const toolController = controller?.addToolCallPart({
@@ -384,8 +390,8 @@ function handleStreamEvent(
     if (toolController) {
       toolContexts.set(call.id, { controller: toolController, argsText: '' });
     }
-    newAssistantParts.push({
-      type: 'tool-call',
+    segments.push({
+      kind: 'tool',
       toolCallId: call.id,
       toolName: call.name,
       args: call.args,
@@ -401,12 +407,12 @@ function handleStreamEvent(
         }),
       );
     }
-    const part = newAssistantParts.find(
-      (p) => p.type === 'tool-call' && p.toolCallId === event.toolCallId,
+    const seg = segments.find(
+      (s) => s.kind === 'tool' && s.toolCallId === event.toolCallId,
     );
-    if (part && part.type === 'tool-call') {
-      part.result = result.output;
-      part.isError = result.ok === false;
+    if (seg) {
+      seg.result = result.output;
+      seg.isError = result.ok === false;
     }
   }
 }
