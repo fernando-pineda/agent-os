@@ -38,13 +38,13 @@ import {
   type PropsWithChildren,
   useContext,
 } from 'react';
+import { useAgentSelection, useAgentUsage } from '@/components/agent-context';
 import {
   ComposerAddAttachment,
   ComposerAttachments,
   UserMessageAttachments,
 } from '@/components/assistant-ui/attachment';
 import { ContextDisplay } from '@/components/assistant-ui/context-display';
-import { useAgentSelection, useAgentUsage } from '@/components/agent-context';
 import { File } from '@/components/assistant-ui/file';
 import { ThreadFollowupSuggestions } from '@/components/assistant-ui/follow-up-suggestions';
 import { Image } from '@/components/assistant-ui/image';
