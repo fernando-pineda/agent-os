@@ -7,7 +7,6 @@ import {
   useAgentsFeed,
   useAgentUsage,
 } from '@/components/agent-context';
-import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
 import {
@@ -349,31 +348,7 @@ export function AgentsPanel() {
                         {agent.name}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <TooltipIconButton
-                        tooltip="Delete agent"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openDeleteDialog(agent);
-                        }}
-                        className="text-zinc-400 hover:bg-zinc-700 hover:text-destructive"
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </TooltipIconButton>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void toggleStartStop(agent);
-                        }}
-                        className="h-6 px-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
-                      >
-                        {isRunning ? 'Stop' : 'Start'}
-                      </Button>
-                    </div>
+
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
                     {agent.group && (
