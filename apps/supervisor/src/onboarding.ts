@@ -14,6 +14,7 @@ interface OnboardingInput {
 interface ModelEntry {
   id: string;
   supportsTools: boolean;
+  serverless: boolean;
   contextLength?: number;
 }
 
@@ -87,13 +88,18 @@ export async function listModels(): Promise<{
     const data = (await res.json()) as unknown;
     const models =
       (data as { models?: Array<Record<string, unknown>> }).models ?? [];
-    const entries: ModelEntry[] = models.map((m) => ({
-      id: String(m.id ?? m.name ?? ''),
-      supportsTools: Boolean(m.supportsTools ?? m.supports_tool_calls ?? false),
-      ...(typeof m.contextLength === 'number' && {
-        contextLength: m.contextLength,
-      }),
-    }));
+    const entries: ModelEntry[] = models
+      .map((m) => ({
+        id: String(m.id ?? m.name ?? ''),
+        supportsTools: Boolean(
+          m.supportsTools ?? m.supports_tool_calls ?? false,
+        ),
+        serverless: Boolean(m.supportsServerless ?? false),
+        ...(typeof m.contextLength === 'number' && {
+          contextLength: m.contextLength,
+        }),
+      }))
+      .filter((m) => m.supportsTools && m.serverless);
     modelCache = { fetchedAt: now, models: entries };
     return { models: entries };
   } catch (err) {

@@ -39,6 +39,7 @@ export interface OnboardingPayload {
 export interface ModelItem {
   id: string;
   supportsTools: boolean;
+  serverless: boolean;
   contextLength?: number;
 }
 
