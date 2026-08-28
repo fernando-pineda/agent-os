@@ -102,7 +102,9 @@ function extractText(parts: unknown): string {
   let prevWasTool = false;
   for (const p of parts) {
     const isTool =
-      p && typeof p === 'object' && (p as { type?: string }).type === 'tool-call';
+      p &&
+      typeof p === 'object' &&
+      (p as { type?: string }).type === 'tool-call';
     if (isTool) {
       prevWasTool = true;
       continue;
