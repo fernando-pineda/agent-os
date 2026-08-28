@@ -7,6 +7,7 @@ import type {
   ModelsResponse,
   OnboardingPayload,
   OnboardingStatus,
+  UpdateAgentPayload,
 } from '@/lib/types';
 
 // Direct to the supervisor; the Next rewrite buffers SSE and breaks events.
@@ -82,6 +83,18 @@ export async function deleteAgent(
       body.error ? `Delete failed: ${body.error}` : `HTTP ${res.status}`,
     );
   }
+}
+
+
+export async function updateAgent(
+  id: string,
+  payload: UpdateAgentPayload,
+): Promise<AgentInfo> {
+  return fetchJson<AgentInfo>(`${BASE}/api/agents/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getUsage(

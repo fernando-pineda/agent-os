@@ -50,3 +50,12 @@ export interface CreateAgentPayload {
   role?: string;
   model?: string;
 }
+
+export interface UpdateAgentPayload {
+  name?: string;
+  group?: string;
+  workspace?: string;
+  role?: string;
+  model?: string;
+  sandboxed?: boolean;
+}
