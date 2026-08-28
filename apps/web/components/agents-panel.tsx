@@ -572,6 +572,9 @@ export function AgentsPanel() {
     setDeleteError('');
     try {
       await deleteAgent(deleteDialog.id, deleteConfirm);
+      if (selectedAgentId === deleteDialog.id) {
+        setSelectedAgentId(null);
+      }
       closeDeleteDialog();
     } catch (err) {
       setDeleteError(
@@ -580,7 +583,13 @@ export function AgentsPanel() {
     } finally {
       setDeleting(false);
     }
-  }, [deleteDialog, deleteConfirm, closeDeleteDialog]);
+  }, [
+    deleteDialog,
+    deleteConfirm,
+    closeDeleteDialog,
+    selectedAgentId,
+    setSelectedAgentId,
+  ]);
 
   // --- Edit dialog state ---
   const [editDialog, setEditDialog] = useState<AgentInfo | null>(null);
