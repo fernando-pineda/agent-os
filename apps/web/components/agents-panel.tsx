@@ -11,7 +11,6 @@ import {
   useAgentSelection,
   useAgentsFeed,
   useAgentUsage,
-  useLivePreview,
 } from '@/components/agent-context';
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button';
 import { ModelPickerModal } from '@/components/model-picker-modal';
@@ -87,7 +86,6 @@ function formatContextLeft(u: {
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
-  const { livePreview } = useLivePreview();
   const { usage } = useAgentUsage();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -355,11 +353,6 @@ export function AgentsPanel() {
                       <span className="truncate text-sm font-medium text-zinc-200">
                         {agent.name}
                       </span>
-                      {livePreview[agent.id] && (
-                        <span className="truncate text-xs italic text-zinc-500 opacity-70">
-                          {livePreview[agent.id]}
-                        </span>
-                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       <TooltipIconButton
