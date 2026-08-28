@@ -6,7 +6,7 @@ import {
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { useLivePreview } from '@/components/agent-context';
+import { useAgentUsage, useLivePreview } from '@/components/agent-context';
 import { getMessages } from '@/lib/api';
 
 export type RuntimeProviderProps = {
@@ -106,6 +106,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const { setLivePreview, clearLivePreview } = useLivePreview();
+  const { setUsage } = useAgentUsage();
 
   useEffect(() => {
     let cancelled = false;
@@ -260,6 +261,16 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 const out = (tp.result ?? '').slice(0, 100);
                 setLivePreview(agentId, out ? `→ ${out}` : 'Done');
               }
+            } else if (line.startsWith('d:')) {
+              const d = JSON.parse(line.slice(2)) as {
+                usage?: { inputTokens?: number; outputTokens?: number };
+              };
+              if (d.usage) {
+                setUsage(agentId, {
+                  inputTokens: d.usage.inputTokens ?? 0,
+                  outputTokens: d.usage.outputTokens ?? 0,
+                });
+              }
             }
           }
         }
@@ -271,7 +282,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
         clearLivePreview(agentId);
       }
     },
-    [agentId, messages, setLivePreview, clearLivePreview],
+    [agentId, messages, setLivePreview, clearLivePreview, setUsage],
   );
 
   const runtime = useExternalStoreRuntime({

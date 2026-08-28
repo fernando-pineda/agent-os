@@ -11,6 +11,8 @@ import {
 import { getAgents, subscribeAgentEvents } from '@/lib/api';
 import type { AgentInfo } from '@/lib/types';
 
+export type AgentUsage = { inputTokens: number; outputTokens: number };
+
 type AgentContextValue = {
   selectedAgentId: string | null;
   setSelectedAgentId: (id: string | null) => void;
@@ -19,6 +21,9 @@ type AgentContextValue = {
   livePreview: Record<string, string>;
   setLivePreview: (agentId: string, text: string) => void;
   clearLivePreview: (agentId: string) => void;
+  // Last reported token usage per agent, for context-left display.
+  usage: Record<string, AgentUsage>;
+  setUsage: (agentId: string, u: AgentUsage) => void;
 };
 
 const AgentContext = createContext<AgentContextValue>({
@@ -28,13 +33,20 @@ const AgentContext = createContext<AgentContextValue>({
   livePreview: {},
   setLivePreview: () => {},
   clearLivePreview: () => {},
+  usage: {},
+  setUsage: () => {},
 });
 
 export function AgentProvider({ children }: { children: ReactNode }) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [livePreview, setLive] = useState<Record<string, string>>({});
+  const [usage, setUsageMap] = useState<Record<string, AgentUsage>>({});
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
+
+  const setUsage = useCallback((agentId: string, u: AgentUsage) => {
+    setUsageMap((prev) => ({ ...prev, [agentId]: u }));
+  }, []);
 
   const setLivePreview = useCallback((agentId: string, text: string) => {
     setLive((prev) => ({ ...prev, [agentId]: text }));
@@ -67,6 +79,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         livePreview,
         setLivePreview,
         clearLivePreview,
+        usage,
+        setUsage,
       }}
     >
       {children}
@@ -93,4 +107,12 @@ export function useLivePreview(): {
     setLivePreview: ctx.setLivePreview,
     clearLivePreview: ctx.clearLivePreview,
   };
+}
+
+export function useAgentUsage(): {
+  usage: Record<string, AgentUsage>;
+  setUsage: (agentId: string, u: AgentUsage) => void;
+} {
+  const ctx = useContext(AgentContext);
+  return { usage: ctx.usage, setUsage: ctx.setUsage };
 }

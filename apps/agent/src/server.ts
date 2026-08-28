@@ -228,6 +228,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     const toolContexts = new Map<string, ToolCallContext>();
     const textParts: string[] = [];
     const newAssistantParts: NewAssistantPart[] = [];
+    let lastUsage: { inputTokens: number; outputTokens: number } | undefined;
     const controller = runningController;
 
     return createAssistantStreamResponse(
@@ -244,6 +245,12 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             ...(memoryIndex ? { memoryIndex } : {}),
             signal: controller.signal,
             onEvent: (event: LoopEvent) => {
+              if (event.type === 'done' && event.usage) {
+                lastUsage = {
+                  inputTokens: event.usage.promptTokens ?? 0,
+                  outputTokens: event.usage.completionTokens ?? 0,
+                };
+              }
               handleStreamEvent(
                 event,
                 streamController,
@@ -255,7 +262,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           });
           await persistTurn(messages, newAssistantParts, textParts, serverDeps);
           // AI SDK data-stream needs explicit finish frames to complete.
-          const finishUsage = { inputTokens: 0, outputTokens: 0 };
+          const finishUsage = lastUsage ?? { inputTokens: 0, outputTokens: 0 };
           streamController.enqueue({
             type: 'step-finish',
             finishReason: 'stop',

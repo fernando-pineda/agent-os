@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   useAgentSelection,
   useAgentsFeed,
+  useAgentUsage,
   useLivePreview,
 } from '@/components/agent-context';
 import { ModelPickerModal } from '@/components/model-picker-modal';
@@ -48,10 +49,24 @@ function truncateModel(model: string): string {
   return parts[parts.length - 1] ?? model;
 }
 
+// Kimi-k2p7-code context window.
+const CONTEXT_WINDOW = 262144;
+
+function formatContextLeft(u: {
+  inputTokens: number;
+  outputTokens: number;
+}): string {
+  const used = u.inputTokens + u.outputTokens;
+  const left = Math.max(0, CONTEXT_WINDOW - used);
+  if (left >= 1000) return `${Math.round(left / 1000)}k ctx left`;
+  return `${left} ctx left`;
+}
+
 export function AgentsPanel() {
   const { selectedAgentId, setSelectedAgentId } = useAgentSelection();
   const agents = useAgentsFeed();
   const { livePreview } = useLivePreview();
+  const { usage } = useAgentUsage();
   const [models, setModels] = useState<ModelItem[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -257,6 +272,11 @@ export function AgentsPanel() {
                   <span className="font-mono">
                     {truncateModel(agent.model)}
                   </span>
+                  {usage[agent.id] && (
+                    <span className="font-mono text-zinc-600">
+                      {formatContextLeft(usage[agent.id]!)}
+                    </span>
+                  )}
                 </div>
                 {agent.currentTaskId && (
                   <div className="mt-1 text-xs text-zinc-500">
