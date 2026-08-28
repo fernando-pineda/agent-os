@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // SSE requires no buffering at the proxy layer
+  httpAgentOptions: {
+    keepAlive: true,
+  },
 };
 
 export default nextConfig;

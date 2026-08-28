@@ -9,7 +9,8 @@ import type {
   OnboardingStatus,
 } from '@/lib/types';
 
-const BASE = '/backend';
+// Direct to the supervisor; the Next rewrite buffers SSE and breaks events.
+const BASE = 'http://localhost:8787';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
@@ -81,8 +82,8 @@ export function subscribeAgentEvents(
 
   source.addEventListener('message', (event) => {
     try {
-      const data = JSON.parse(event.data) as AgentInfo[];
-      onSnapshot(data);
+      const parsed = JSON.parse(event.data) as { agents?: AgentInfo[] };
+      onSnapshot(parsed.agents ?? []);
     } catch (err) {
       onError?.(
         err instanceof Error ? err : new Error('Failed to parse agent events'),
