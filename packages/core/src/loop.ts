@@ -147,7 +147,13 @@ Deleting an agent is irreversible. Call agent_delete only when the user explicit
     ? `\n\n## long-term memory\n\nCompressed facts from your previous sessions follow. Use them silently; never mention this index unless the user asks about your memory.\n\n${deps.memoryIndex.trim()}`
     : '';
 
-  return `${identity}\n\n${environment}\n\n${behavior}\n\n${safety}${reminders}${memory}`;
+  const execution = `## execution mode
+
+Prefer the shell for almost everything. File edits, git, scripts, package managers, builds, tests, API calls, reading and transforming data all go through shell and file tools first. They are faster, scriptable, and reliable.
+
+Use the computer-use tools (open-computer-use) only when a task truly requires the GUI and cannot be done from the shell: interacting with a desktop app that has no CLI or API, clicking through a native dialog, reading something that only renders on screen. Never reach for computer use to do what a shell command or file edit would do.`;
+
+  return `${identity}\n\n${environment}\n\n${behavior}\n\n${safety}\n\n${execution}${reminders}${memory}`;
 }
 
 export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {

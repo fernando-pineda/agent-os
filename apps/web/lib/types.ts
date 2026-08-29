@@ -44,6 +44,7 @@ export interface ModelItem {
   supportsTools: boolean;
   serverless: boolean;
   contextLength?: number;
+  supportsVision?: boolean;
 }
 
 export interface ModelsResponse {

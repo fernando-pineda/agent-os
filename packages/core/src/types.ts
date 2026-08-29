@@ -35,6 +35,7 @@ export interface AgentConfig {
   workspace?: string;
   role?: string;
   model?: string;
+  supportsVision?: boolean;
   git?: {
     userName?: string;
     userEmail?: string;
@@ -82,9 +83,15 @@ export interface ToolSpec {
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
+export interface ChatImage {
+  data: string; // raw base64, no data: prefix
+  mimeType: string;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  images?: ChatImage[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
 }
@@ -119,6 +126,7 @@ export interface ToolResult {
   ok: boolean;
   output: string;
   isError?: boolean;
+  images?: ChatImage[];
 }
 
 export interface ToolContext {

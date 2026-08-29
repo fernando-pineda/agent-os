@@ -1,12 +1,18 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { ChatMessage, ToolCall } from '@agent-os/core';
+import type { ChatImage, ChatMessage, ToolCall } from '@agent-os/core';
 
 export type UIMessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export interface UIMessageTextPart {
   type: 'text';
   text: string;
+}
+
+export interface UIMessageImagePart {
+  type: 'image';
+  image: string; // data URL
+  mimeType: string;
 }
 
 export interface UIMessageToolCallPart {
@@ -25,6 +31,7 @@ export interface UIMessageToolResultPart {
 
 export type UIMessagePart =
   | UIMessageTextPart
+  | UIMessageImagePart
   | UIMessageToolCallPart
   | UIMessageToolResultPart;
 
@@ -154,7 +161,13 @@ export function uiMessagesToChat(messages: UIMessage[]): ChatMessage[] {
       result.push(assistantMsg);
       continue;
     }
-    result.push({ role: m.role, content });
+    // User messages may carry image parts; extract raw base64 + mimeType.
+    const images = imageParts(m);
+    const userMsg: ChatMessage = { role: m.role, content };
+    if (images.length > 0) {
+      userMsg.images = images;
+    }
+    result.push(userMsg);
   }
   return result;
 }
@@ -167,4 +180,18 @@ function textParts(m: UIMessage): string[] {
     }
   }
   return parts;
+}
+
+// Extract image parts from a UIMessage, stripping the data: prefix to raw
+// base64 and capturing the mimeType.
+function imageParts(m: UIMessage): ChatImage[] {
+  const out: ChatImage[] = [];
+  for (const part of m.parts ?? []) {
+    if (part.type !== 'image') continue;
+    const match = /^data:([^;]+);base64,(.+)$/s.exec(part.image);
+    if (match?.[1] && match[2]) {
+      out.push({ mimeType: match[1], data: match[2] });
+    }
+  }
+  return out;
 }

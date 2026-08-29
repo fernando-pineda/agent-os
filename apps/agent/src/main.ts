@@ -99,6 +99,7 @@ async function main(): Promise<void> {
     agent,
     model,
     provider: config.provider,
+    supportsVision: agent.supportsVision === true,
     llm,
     tools: allTools,
     status: 'starting',

@@ -22,6 +22,7 @@ interface ModelEntry {
   supportsTools: boolean;
   serverless: boolean;
   contextLength?: number;
+  supportsVision?: boolean;
 }
 
 interface ModelCache {
@@ -124,6 +125,7 @@ export async function listModels(): Promise<{
         supportsTools: true,
         serverless: true,
         contextLength: 1000000,
+        supportsVision: true,
       },
       {
         id: 'GLM-5.2',
@@ -142,6 +144,13 @@ export async function listModels(): Promise<{
         supportsTools: true,
         serverless: true,
         contextLength: 200000,
+      },
+      {
+        id: 'GLM-4.6V',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 200000,
+        supportsVision: true,
       },
     ];
     modelCache = { fetchedAt: now, models: entries };
@@ -173,6 +182,9 @@ export async function listModels(): Promise<{
         serverless: Boolean(m.supportsServerless ?? false),
         ...(typeof m.contextLength === 'number' && {
           contextLength: m.contextLength,
+        }),
+        ...(typeof m.supportsImageInput === 'boolean' && {
+          supportsVision: m.supportsImageInput,
         }),
       }))
       .filter((m) => m.supportsTools && m.serverless);

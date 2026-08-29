@@ -125,6 +125,18 @@ function toOpenAIMessage(
     return { role: 'system', content: m.content };
   }
   if (m.role === 'user') {
+    if (m.images && m.images.length > 0) {
+      const parts: OpenAI.Chat.ChatCompletionContentPart[] = [
+        { type: 'text', text: m.content },
+      ];
+      for (const img of m.images) {
+        parts.push({
+          type: 'image_url',
+          image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+        });
+      }
+      return { role: 'user', content: parts };
+    }
     return { role: 'user', content: m.content };
   }
   if (m.role === 'assistant') {

@@ -7,6 +7,7 @@ import { json } from 'node:stream/consumers';
 import type {
   AgentConfig,
   AgentStatus,
+  ChatImage,
   ChatMessage,
   LLMClient,
   LoopEvent,
@@ -47,6 +48,7 @@ export interface ServerDeps {
   agent: AgentConfig;
   model: string;
   provider?: 'fireworks' | 'zai';
+  supportsVision?: boolean;
   llm: LLMClient;
   tools: Tool[];
   status: AgentStatus;
@@ -85,6 +87,7 @@ interface TurnSegment {
   args?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+  images?: ChatImage[];
 }
 
 interface RunControls {
@@ -543,6 +546,21 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     runningController = new AbortController();
 
     const chatMessages = uiMessagesToChat(messages);
+    // Drop images from messages sent to the LLM when the model cannot see
+    // them. The persisted thread keeps images regardless.
+    const supportsVision = serverDeps.supportsVision === true;
+    const llmMessages = supportsVision
+      ? chatMessages
+      : chatMessages.map((m) => {
+          if (!m.images) return m;
+          const rest: Omit<ChatMessage, 'images'> = {
+            role: m.role,
+            content: m.content,
+          };
+          if (m.toolCalls) rest.toolCalls = m.toolCalls;
+          if (m.toolCallId) rest.toolCallId = m.toolCallId;
+          return rest;
+        });
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
     let lastUsage: { inputTokens: number; outputTokens: number } | undefined;
@@ -571,7 +589,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             tools,
             model: serverDeps.model,
             ...(serverDeps.provider ? { provider: serverDeps.provider } : {}),
-            messages: chatMessages,
+            messages: llmMessages,
             agentId: serverDeps.agentId,
             ...(agentName ? { agentName } : {}),
             ...(agentRole ? { role: agentRole } : {}),
@@ -775,8 +793,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         }
       }
       // Persist the inbound message so the UI can surface it and the model
-      // sees it in context after restarts. Replies go out via message_agent,
-      // not an auto-forward, so no replyToAgentId is set here.
+      // sees it in context after restarts. replyToAgentId marks the assistant
+      // messages as replies to the sender so the replied chip survives reloads.
       const inbound: UIMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -792,7 +810,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           ...(body.inReplyTo ? { reply: true } : {}),
         },
       };
-      await persistTurn([inbound], segments, serverDeps);
+      await persistTurn([inbound], segments, serverDeps, {
+        replyToAgentId: body.fromAgentId,
+      });
     } catch (err) {
       console.error('Inbox loop error', err);
     } finally {
@@ -856,6 +876,16 @@ function handleStreamEvent(
     if (seg) {
       seg.result = result.output;
       seg.isError = result.ok === false;
+      if (result.images?.length) {
+        seg.images = result.images;
+        for (const img of result.images) {
+          controller?.appendFile({
+            type: 'file',
+            data: img.data,
+            mimeType: img.mimeType,
+          });
+        }
+      }
     }
   }
 }
@@ -965,6 +995,15 @@ async function persistTurn(
         ...(seg.result !== undefined && { result: seg.result }),
         ...(seg.isError !== undefined && { isError: seg.isError }),
       });
+      if (seg.images?.length) {
+        for (const img of seg.images) {
+          parts.push({
+            type: 'image',
+            image: `data:${img.mimeType};base64,${img.data}`,
+            mimeType: img.mimeType,
+          });
+        }
+      }
       current.parts = parts;
     }
   }

@@ -160,7 +160,26 @@ function toAnthropicMessages(messages: ChatMessage[]): {
       continue;
     }
 
-    out.push({ role: 'user', content: m.content });
+    // User message with images sends content as an array of text + image blocks.
+    if (m.images && m.images.length > 0) {
+      const blocks: ContentBlockParam[] = [];
+      if (m.content) {
+        blocks.push({ type: 'text', text: m.content });
+      }
+      for (const img of m.images) {
+        blocks.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+            data: img.data,
+          },
+        });
+      }
+      out.push({ role: 'user', content: blocks });
+    } else {
+      out.push({ role: 'user', content: m.content });
+    }
   }
 
   const system = systemParts.length > 0 ? systemParts.join('\n\n') : undefined;

@@ -5,7 +5,6 @@ import {
   ActionBarPrimitive,
   type AssistantState,
   AuiIf,
-  BranchPickerPrimitive,
   ComposerPrimitive,
   ErrorPrimitive,
   type FileMessagePartComponent,
@@ -23,8 +22,6 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
   MicIcon,
@@ -45,6 +42,7 @@ import {
   useAgentSelection,
   useAgentsFeed,
   useAgentUsage,
+  useLivePreview,
   useModelsFeed,
 } from '@/components/agent-context';
 import {
@@ -58,6 +56,7 @@ import { ThreadFollowupSuggestions } from '@/components/assistant-ui/follow-up-s
 import { Image } from '@/components/assistant-ui/image';
 import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import {
+  AgentAvatarTile,
   InboxAgentChip,
   MessageAgentChip,
   RepliedToAgentChip,
@@ -290,6 +289,10 @@ const ThreadSuggestionItem: FC = () => {
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const agents = useAgentsFeed();
+  const { selectedAgentId } = useAgentSelection();
+  const activeAgent = agents.find((a) => a.id === selectedAgentId);
+  const { livePreview } = useLivePreview();
+  const preview = selectedAgentId ? livePreview[selectedAgentId] : undefined;
   const mention = unstable_useMentionAdapter({
     items: agents.map((a) => ({
       id: a.id,
@@ -299,9 +302,30 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
     })),
   });
 
+  const agentBusy =
+    activeAgent?.status === 'busy' || activeAgent?.status === 'starting';
+  const agentName = activeAgent?.name ?? 'Agent';
+  const activityLabel = (() => {
+    if (!agentBusy) return '';
+    const match = /^Running (.+)\.\.\.$/.exec(preview ?? '');
+    if (match?.[1]) return `${agentName} is running ${match[1]}...`;
+    return `${agentName} is thinking...`;
+  })();
+
   return (
     <ComposerPrimitive.Unstable_TriggerPopoverRoot>
       <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+        {agentBusy && (
+          <div className="mb-1.5 flex items-center gap-2">
+            <span
+              className="status-pulse inline-flex items-center"
+              title="Agent is working"
+            >
+              <AgentAvatarTile agent={activeAgent} />
+            </span>
+            <span className="text-xs text-zinc-500">{activityLabel}</span>
+          </div>
+        )}
         <ComposerPrimitive.AttachmentDropzone
           render={
             <div
@@ -576,7 +600,6 @@ const AssistantMessage: FC = () => {
         data-slot="aui_assistant-message-footer"
         className={cn('ms-2 flex items-center', ACTION_BAR_HEIGHT)}
       >
-        <BranchPicker />
         <AssistantActionBar />
       </div>
     </MessagePrimitive.Root>
@@ -691,11 +714,6 @@ const UserMessage: FC = () => {
           <UserActionBar />
         </div>
       </div>
-
-      <BranchPicker
-        data-slot="aui_user-branch-picker"
-        className="col-span-full col-start-1 row-start-3 -me-1 justify-end"
-      />
     </MessagePrimitive.Root>
   );
 };
@@ -749,33 +767,5 @@ const EditComposer: FC = () => {
         </div>
       </ComposerPrimitive.Root>
     </MessagePrimitive.Root>
-  );
-};
-
-const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
-  className,
-  ...rest
-}) => {
-  return (
-    <BranchPickerPrimitive.Root
-      hideWhenSingleBranch
-      className={cn(
-        'aui-branch-picker-root text-muted-foreground -ms-2 me-2 inline-flex items-center text-xs',
-        className,
-      )}
-      {...rest}
-    >
-      <BranchPickerPrimitive.Previous
-        render={<TooltipIconButton tooltip="Previous" />}
-      >
-        <ChevronLeftIcon />
-      </BranchPickerPrimitive.Previous>
-      <span className="aui-branch-picker-state font-medium">
-        <BranchPickerPrimitive.Number /> / <BranchPickerPrimitive.Count />
-      </span>
-      <BranchPickerPrimitive.Next render={<TooltipIconButton tooltip="Next" />}>
-        <ChevronRightIcon />
-      </BranchPickerPrimitive.Next>
-    </BranchPickerPrimitive.Root>
   );
 };

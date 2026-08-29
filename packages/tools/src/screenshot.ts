@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Tool, ToolContext, ToolResult } from '@agent-os/core';
+import type { ChatImage, Tool, ToolContext, ToolResult } from '@agent-os/core';
 import { type Browser, type Page, webkit } from 'playwright';
 
 const DEFAULT_WIDTH = 1280;
@@ -43,7 +44,18 @@ export const screenshot: Tool = {
       page = await browser.newPage({ viewport: { width, height } });
       await page.goto(url, { timeout: GOTO_TIMEOUT_MS, waitUntil: 'load' });
       await page.screenshot({ path: outputPath, fullPage: false });
-      return { ok: true, output: outputPath };
+      const images: ChatImage[] = [];
+      try {
+        const buf = await readFile(outputPath);
+        images.push({ data: buf.toString('base64'), mimeType: 'image/png' });
+      } catch {
+        // Read-back failed; still return the path for the LLM.
+      }
+      return {
+        ok: true,
+        output: outputPath,
+        ...(images.length > 0 && { images }),
+      };
     } catch (err) {
       return {
         ok: false,

@@ -49,6 +49,7 @@ interface AgentConfig {
   workspace?: string;  // shared macOS user/home; default = own id (solo)
   role?: string;       // responsibility inside a team workspace, shapes the system prompt
   model?: string;      // overrides GlobalConfig.defaultModel when set
+  supportsVision?: boolean; // whether the resolved model accepts image inputs
   git?: {
     userName?: string;     // commits authored as this identity
     userEmail?: string;
@@ -102,11 +103,17 @@ interface ToolSpec {
 
 type ChatRole = "system" | "user" | "assistant" | "tool";
 
+interface ChatImage {
+  data: string;       // raw base64, no data: prefix
+  mimeType: string;   // e.g. "image/png"
+}
+
 interface ChatMessage {
   role: ChatRole;
   content: string;
-  toolCalls?: ToolCall[];       // assistant messages that requested tools
-  toolCallId?: string;          // tool messages: id of the call being answered
+  images?: ChatImage[];       // user messages with image attachments (vision models only)
+  toolCalls?: ToolCall[];     // assistant messages that requested tools
+  toolCallId?: string;        // tool messages: id of the call being answered
 }
 
 interface ToolCall {
@@ -133,7 +140,7 @@ interface LLMClient {
 }
 ```
 
-Implementations in packages/core: `FireworksLLMClient` (openai npm pointed at Fireworks) and `MockLLMClient` (deterministic, for verification without a key; echoes and can exercise one shell tool call).
+Implementations in packages/core: `FireworksLLMClient` (openai npm pointed at Fireworks, sends images as `image_url` content parts) and `ZaiLLMClient` (Anthropic SDK pointed at z.ai, sends images as `image` source blocks). `MockLLMClient` (deterministic, for verification without a key; echoes and can exercise one shell tool call).
 
 ## Tool interface (packages/core, implemented by packages/tools)
 
@@ -142,6 +149,7 @@ interface ToolResult {
   ok: boolean;
   output: string;   // text returned to the LLM
   isError?: boolean;
+  images?: ChatImage[]; // base64 images surfaced to the chat UI (not sent to the LLM)
 }
 
 interface ToolContext {
@@ -178,7 +186,7 @@ Everything is direct HTTP. packages/transport is DELETED.
 
 ### Agent HTTP server (apps/agent, one process per agent)
 
-- `POST /chat` AI SDK data-stream protocol. Body `{ messages: UIMessage[] }`. Runs the agent loop, streams AI SDK frames (text `0:`, tool `b:/c:/a:`) via assistant-stream DataStreamResponse. Persists the thread to `<workspaceHome>/thread.json` on completion.
+- `POST /chat` AI SDK data-stream protocol. Body `{ messages: UIMessage[] }`. UIMessage parts may include `{ type: "image", image: <data-url>, mimeType }` for user messages. Runs the agent loop, streams AI SDK frames (text `0:`, tool `b:/c:/a:`, file `k:`) via assistant-stream DataStreamResponse. Tool results carrying `images` (e.g. the `screenshot` tool) are streamed as `k:` file parts and persisted as image parts on the assistant message. Persists the thread to `<workspaceHome>/thread.json` on completion. When the agent's model does not support vision, image parts are stripped before sending to the LLM but remain in the persisted thread.
 - `GET /messages` returns the persisted thread messages (UIMessage[]) for UI history load.
 - `POST /inbox` agent-to-agent. Body `{ fromAgentId, taskId, message }`. Injects as a user message prefixed `Message from agent <from>:` into the loop and returns the reply text. The reply is also persisted to the thread.
 - `GET /health` -> `{ ok: true, status: AgentStatus, currentTaskId?: string }`
@@ -251,7 +259,7 @@ type AgentCommand = { type: "cancel"; taskId: string };
 - `POST /api/mcp` body `McpServerConfig` -> validates, rejects duplicate name with 409, persists to `~/.agent-os/config.json`, returns 201 with the created server
 - `PATCH /api/mcp/:name` body `Partial<McpServerConfig>` -> updates fields, rename allowed if new name not taken, 404 if not found, returns updated server
 - `DELETE /api/mcp/:name` -> removes server, 404 if not found, returns `{ ok: true }`
-- `GET /api/models` -> `{ models: { id: string; supportsTools: boolean }[] }` proxied from Fireworks, cached 5 min
+- `GET /api/models` -> `{ models: { id: string; supportsTools: boolean; supportsVision?: boolean }[] }` proxied from Fireworks or z.ai static list, cached 5 min. `supportsVision` is set when the provider reports image input capability.
 - `GET /api/agents` -> `{ agents: AgentInfo[] }`
 - `POST /api/agents` body `{ name: string; group?: string; model?: string; avatar?: { character: string; color: string }; plugins?: string[]; reminders?: string[] }` -> creates agent (home dir, config, tmux session, process), returns `AgentInfo`. Avatar is always set: if omitted or invalid the server assigns a default (first character, zinc color); an explicitly invalid avatar returns 400
 - `PATCH /api/agents/{id}` body `{ name?; group?; role?; instructions?; model?; workspace?; sandboxed?; avatar?; plugins?: string[]; reminders?: string[] }` -> updates config (plugins validated against GET /api/mcp server names, unknown names return 400; reminders undefined means unchanged, [] clears), returns updated `AgentConfig`
@@ -351,3 +359,7 @@ The agent exposes automation management as built-in tools so the LLM can self-ma
 - `automation_update` -> updates an existing automation by id.
 - `automation_delete` -> deletes an automation by id.
 - `automation_run` -> runs an automation immediately by id.
+
+### Screenshot tool
+
+The `screenshot` tool (packages/tools) captures a web page via Playwright and saves the PNG to `<homeDir>/<outputPath>`. After saving, it reads the file back and returns `ToolResult { ok: true, output: <path>, images: [{ data: <base64>, mimeType: "image/png" }] }`. The `images` field surfaces the capture in the chat UI (streamed live as a `k:` file part, persisted as an image part on the assistant message). Image parts on assistant messages are not re-sent to the LLM.

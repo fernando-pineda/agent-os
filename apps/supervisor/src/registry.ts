@@ -25,9 +25,12 @@ import {
   usernameForWorkspace,
 } from '@agent-os/sandbox';
 import { uninstallLaunchdAgent } from './launchd.js';
+import { listModels } from './onboarding.js';
 
 export const AGENTS_ROOT = join(homedir(), '.agent-os', 'agents');
 const REGISTRY_PATH = join(homedir(), '.agent-os', 'registry.json');
+// MCP plugins activated on every new agent unless the creator unchecks them.
+const DEFAULT_PLUGINS = ['open-computer-use'];
 
 export interface RegistryEntry {
   id: string;
@@ -118,6 +121,20 @@ export function validateWorkspace(value: string | undefined): string | null {
   return 'workspace must be 1-32 lowercase letters, numbers, or hyphens';
 }
 
+// Look up a model's vision capability from the provider's model list.
+async function resolveModelVision(
+  modelId: string,
+): Promise<boolean | undefined> {
+  try {
+    const { models } = await listModels();
+    const lower = modelId.toLowerCase();
+    // Model ids vary in case across sources (config vs catalog).
+    return models.find((m) => m.id.toLowerCase() === lower)?.supportsVision;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface CreateAgentInput {
   name: string;
   group?: string | undefined;
@@ -173,7 +190,11 @@ export async function updateAgentConfig(
   if (patch.name !== undefined) config.name = patch.name;
   if (patch.group !== undefined) config.group = patch.group;
   if (patch.role !== undefined) config.role = patch.role;
-  if (patch.model !== undefined) config.model = patch.model;
+  if (patch.model !== undefined) {
+    config.model = patch.model;
+    const vision = await resolveModelVision(patch.model);
+    if (vision !== undefined) config.supportsVision = vision;
+  }
   if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
   if (patch.avatar !== undefined) config.avatar = patch.avatar;
   if (patch.instructions !== undefined)
@@ -255,11 +276,16 @@ export async function createAgent(
   if (input.group) config.group = input.group;
   if (input.workspace) config.workspace = input.workspace;
   if (input.role) config.role = input.role;
-  if (input.model) config.model = input.model;
+  if (input.model) {
+    config.model = input.model;
+    const vision = await resolveModelVision(input.model);
+    if (vision !== undefined) config.supportsVision = vision;
+  }
   if (input.sandboxed) config.sandboxed = input.sandboxed;
   if (input.avatar) config.avatar = input.avatar;
   if (input.instructions) config.instructions = input.instructions;
-  if (input.plugins) config.plugins = input.plugins;
+  const plugins = [...new Set([...(input.plugins ?? []), ...DEFAULT_PLUGINS])];
+  if (plugins.length > 0) config.plugins = plugins;
   if (input.reminders) config.reminders = input.reminders;
   if (input.git) {
     config.git = {

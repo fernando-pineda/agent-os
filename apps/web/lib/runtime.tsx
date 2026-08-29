@@ -3,6 +3,7 @@
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import {
   AssistantRuntimeProvider,
+  SimpleImageAttachmentAdapter,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import {
@@ -34,10 +35,13 @@ type ToolPart = {
   isError?: boolean;
 };
 
+type MsgImage = { data: string; mimeType: string };
+
 type Msg = {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  images?: MsgImage[];
   toolParts?: ToolPart[];
   // message_agent calls render as a standalone centered chip message.
   messageAgent?: { toAgentId: string; state: 'sending' | 'sent' | 'failed' };
@@ -73,6 +77,14 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
   const content: Part[] = [];
   if (m.text) {
     content.push({ type: 'text', text: m.text });
+  }
+  if (m.images) {
+    for (const img of m.images) {
+      content.push({
+        type: 'image',
+        image: `data:${img.mimeType};base64,${img.data}`,
+      } as never);
+    }
   }
   // Tool calls are hidden from the thread; only agent-messaging chips render.
   if (content.length === 0) {
@@ -145,9 +157,31 @@ function extractToolParts(parts: unknown): ToolPart[] {
   return out;
 }
 
+// Extract image parts from persisted UIMessage parts, converting data URLs
+// back to raw base64 + mimeType for storage in Msg.images.
+function extractImageParts(parts: unknown): MsgImage[] {
+  if (!Array.isArray(parts)) return [];
+  const out: MsgImage[] = [];
+  for (const p of parts) {
+    if (
+      p &&
+      typeof p === 'object' &&
+      (p as { type?: string }).type === 'image'
+    ) {
+      const image = String((p as { image?: unknown }).image ?? '');
+      const match = /^data:([^;]+);base64,(.+)$/.exec(image);
+      if (match?.[1] && match[2]) {
+        out.push({ mimeType: match[1], data: match[2] });
+      }
+    }
+  }
+  return out;
+}
+
 // Walk interleaved parts in order and emit one Msg per text run and per
 // non-message_agent tool call, so reload matches the live render instead of
-// grouping all text above all tool chips.
+// grouping all text above all tool chips. Image parts attach to the
+// preceding text Msg or form their own Msg.
 function buildOrderedMsgs(
   id: string,
   role: Msg['role'],
@@ -168,11 +202,36 @@ function buildOrderedMsgs(
       p &&
       typeof p === 'object' &&
       (p as { type?: string }).type === 'tool-call';
+    const isImage =
+      p && typeof p === 'object' && (p as { type?: string }).type === 'image';
     if (isTool) {
       const tp = extractToolParts([p]);
       // Hidden from the thread; only message_agent renders, as a chip.
       flushText();
       prevWasTool = true;
+      continue;
+    }
+    if (isImage) {
+      const img = extractImageParts([p]);
+      if (img.length > 0) {
+        const last = out[out.length - 1];
+        if (
+          last &&
+          last.role === role &&
+          !last.messageAgent &&
+          !last.inboxAgent
+        ) {
+          last.images = [...(last.images ?? []), ...img];
+        } else {
+          out.push({
+            id: `${id}-img${out.length}`,
+            role,
+            text: '',
+            images: img,
+          });
+        }
+      }
+      prevWasTool = false;
       continue;
     }
     const t =
@@ -191,9 +250,10 @@ function buildOrderedMsgs(
 // Rebuild chip messages from persisted message_agent tool-call parts.
 function extractMessageAgentChips(
   parts: unknown,
-): NonNullable<Msg['messageAgent']>[] {
+): (NonNullable<Msg['messageAgent']> & { toolCallId: string })[] {
   if (!Array.isArray(parts)) return [];
-  const chips: NonNullable<Msg['messageAgent']>[] = [];
+  const chips: (NonNullable<Msg['messageAgent']> & { toolCallId: string })[] =
+    [];
   for (const p of parts) {
     if (
       p &&
@@ -212,7 +272,11 @@ function extractMessageAgentChips(
         lower.startsWith('agent') ||
         lower.startsWith('busy') ||
         lower.startsWith('unreachable');
-      chips.push({ toAgentId, state: failed ? 'failed' : 'sent' });
+      chips.push({
+        toolCallId: String(o.toolCallId ?? crypto.randomUUID()),
+        toAgentId,
+        state: failed ? 'failed' : 'sent',
+      });
     }
   }
   return chips;
@@ -221,12 +285,21 @@ function extractMessageAgentChips(
 const INBOX_RE = /^\[agent-os:inbox from=([^\s\]]+)( reply)?\]/;
 
 // Inbound agent messages get a chip before the (hidden) original text message.
+// Detected via metadata.agentOsInbox (persisted) or the [agent-os:inbox] text
+// prefix (older threads).
 function extractInboxChip(m: {
   role: string;
   parts?: unknown;
   content?: unknown;
+  metadata?: unknown;
 }): NonNullable<Msg['inboxAgent']> | undefined {
   if (m.role !== 'user') return undefined;
+  const meta = m.metadata as
+    | { agentOsInbox?: boolean; fromAgentId?: string; reply?: boolean }
+    | undefined;
+  if (meta?.agentOsInbox && typeof meta.fromAgentId === 'string') {
+    return { fromAgentId: meta.fromAgentId, reply: Boolean(meta.reply) };
+  }
   const text =
     extractText(m.parts) || (m as { content?: string }).content || '';
   const match = INBOX_RE.exec(typeof text === 'string' ? text : '');
@@ -248,12 +321,18 @@ function extractRepliedToChip(m: {
 }
 
 // Parse persisted UIMessages into render Msgs. Shared by initial load and
-// the live message stream.
+// the live message stream. Ids are made unique per message index because
+// several persisted messages can share an id after turn re-persists.
 function parseThreadMessages(ui: unknown[]): Msg[] {
   const seenIds = new Set<string>();
   return (ui as Record<string, unknown>[]).flatMap((m, i) => {
-    let id = (m.id as string | undefined) ?? `m-${i}`;
-    while (seenIds.has(id)) id = `${id}-${i}`;
+    const base = (m.id as string | undefined) ?? `m-${i}`;
+    let id = base;
+    if (seenIds.has(base)) {
+      let n = 1;
+      while (seenIds.has(`${base}~${n}`)) n++;
+      id = `${base}~${n}`;
+    }
     seenIds.add(id);
     const role = m.role as Msg['role'];
     const parts = m.parts as unknown;
@@ -261,7 +340,7 @@ function parseThreadMessages(ui: unknown[]): Msg[] {
     const inboxChip = extractInboxChip(m as never);
     if (inboxChip) {
       out.push({
-        id: `${id}-inbox`,
+        id: `inbox-${id}`,
         role: 'assistant',
         text: '',
         inboxAgent: inboxChip,
@@ -269,12 +348,12 @@ function parseThreadMessages(ui: unknown[]): Msg[] {
       return out;
     }
     const chips = extractMessageAgentChips(parts);
-    chips.forEach((chip, j) => {
+    chips.forEach((chip) => {
       out.push({
-        id: `${id}-chip-${j}`,
+        id: `chip-${chip.toolCallId}`,
         role: 'assistant',
         text: '',
-        messageAgent: chip,
+        messageAgent: { toAgentId: chip.toAgentId, state: chip.state },
       });
     });
     const repliedToChip = extractRepliedToChip(m as never);
@@ -292,7 +371,14 @@ function parseThreadMessages(ui: unknown[]): Msg[] {
     } else if (chips.length === 0) {
       const text =
         extractText(parts) || (m as { content?: string }).content || '';
-      out.push({ id, role, text, toolParts: [] });
+      const images = extractImageParts(parts);
+      out.push({
+        id,
+        role,
+        text,
+        ...(images.length > 0 && { images }),
+        toolParts: [],
+      });
     }
     return out;
   });
@@ -353,16 +439,35 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const onNew = useCallback(
     async (message: {
       content: ReadonlyArray<{ type: string; text?: string }>;
+      attachments?: ReadonlyArray<{
+        type: string;
+        content?: ReadonlyArray<{ type: string; image?: string }>;
+      }>;
     }) => {
       const text = message.content
         .map((p) => (p.type === 'text' ? (p.text ?? '') : ''))
         .join('');
       if (!text) return;
 
+      // Extract completed image attachments as base64 + mimeType.
+      const images: MsgImage[] = [];
+      for (const att of message.attachments ?? []) {
+        if (att.type !== 'image') continue;
+        for (const part of att.content ?? []) {
+          if (part.type !== 'image') continue;
+          const dataUrl = part.image ?? '';
+          const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+          if (match?.[1] && match[2]) {
+            images.push({ mimeType: match[1], data: match[2] });
+          }
+        }
+      }
+
       const userMsg: Msg = {
         id: crypto.randomUUID(),
         role: 'user',
         text,
+        ...(images.length > 0 && { images }),
       };
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
@@ -420,11 +525,22 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
             headers: { 'content-type': 'application/json' },
             signal: controller.signal,
             body: JSON.stringify({
-              messages: nextMessages.map((m) => ({
-                id: m.id,
-                role: m.role,
-                parts: [{ type: 'text', text: m.text }],
-              })),
+              messages: nextMessages.map((m) => {
+                const parts: Array<
+                  | { type: 'text'; text: string }
+                  | { type: 'image'; image: string; mimeType: string }
+                > = [{ type: 'text', text: m.text }];
+                if (m.images) {
+                  for (const img of m.images) {
+                    parts.push({
+                      type: 'image',
+                      image: `data:${img.mimeType};base64,${img.data}`,
+                      mimeType: img.mimeType,
+                    });
+                  }
+                }
+                return { id: m.id, role: m.role, parts };
+              }),
             }),
           },
         );
@@ -458,7 +574,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                   startNew();
                 }
                 const chip: Msg = {
-                  id: d.toolCallId,
+                  id: `chip-${d.toolCallId}`,
                   role: 'assistant',
                   text: '',
                   messageAgent: { toAgentId: '', state: 'sending' },
@@ -554,6 +670,20 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                   outputTokens: d.usage.outputTokens ?? 0,
                 });
               }
+            } else if (line.startsWith('k:')) {
+              // File part from the agent (e.g. screenshot tool output).
+              const d = JSON.parse(line.slice(2)) as {
+                data: string;
+                mimeType: string;
+              };
+              const img: MsgImage = { data: d.data, mimeType: d.mimeType };
+              if (current.text || (current.toolParts?.length ?? 0) > 0) {
+                current.images = [...(current.images ?? []), img];
+                pushCurrent();
+              } else {
+                current.images = [img];
+                pushCurrent();
+              }
             }
           }
         }
@@ -600,6 +730,9 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     isRunning,
     onNew,
     onCancel,
+    adapters: {
+      attachments: new SimpleImageAttachmentAdapter(),
+    },
   });
 
   if (!loaded) {

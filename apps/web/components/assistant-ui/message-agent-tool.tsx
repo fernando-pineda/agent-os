@@ -11,7 +11,7 @@ type MessageAgentData = {
   state: 'sending' | 'sent' | 'failed';
 };
 
-function AgentAvatarTile({ agent }: { agent: AgentInfo | undefined }) {
+export function AgentAvatarTile({ agent }: { agent: AgentInfo | undefined }) {
   if (!agent?.avatar) {
     return (
       <div className="flex size-6 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/50">

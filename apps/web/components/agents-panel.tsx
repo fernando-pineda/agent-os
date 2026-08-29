@@ -71,6 +71,9 @@ import type {
   ModelItem,
 } from '@/lib/types';
 
+// MCP plugins preselected on the create form, mirroring the supervisor default.
+const DEFAULT_PLUGINS = ['open-computer-use'];
+
 function statusColor(status: AgentStatus): string {
   switch (status) {
     case 'starting':
@@ -475,11 +478,6 @@ function GroupSection({
                   </div>
                 </div>
               </div>
-              {agent.currentTaskId && (
-                <div className="mt-1 text-xs text-zinc-500">
-                  task {agent.currentTaskId.slice(0, 8)}
-                </div>
-              )}
             </ContextMenuTrigger>
             <ContextMenuContent>
               <ContextMenuItem onClick={() => openEditDialog(agent)}>
@@ -575,7 +573,7 @@ export function AgentsPanel() {
 
   useEffect(() => {
     if (dialogOpen) {
-      setSelectedPlugins([]);
+      setSelectedPlugins([...DEFAULT_PLUGINS]);
       setReminders([]);
       void refreshMcpServers();
     }
