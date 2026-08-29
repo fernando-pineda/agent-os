@@ -71,8 +71,10 @@ import type {
   ModelItem,
 } from '@/lib/types';
 
-// MCP plugins preselected on the create form, mirroring the supervisor default.
-const DEFAULT_PLUGINS = ['open-computer-use'];
+// MCP plugins preselected on the create form. Names must exist in the
+// supervisor's MCP catalog or creation is rejected, so only preselect ones
+// that are actually configured (intersected at open time below).
+const DEFAULT_PLUGINS: string[] = [];
 
 function statusColor(status: AgentStatus): string {
   switch (status) {
@@ -573,11 +575,14 @@ export function AgentsPanel() {
 
   useEffect(() => {
     if (dialogOpen) {
-      setSelectedPlugins([...DEFAULT_PLUGINS]);
       setReminders([]);
-      void refreshMcpServers();
+      void (async () => {
+        await refreshMcpServers();
+        const available = new Set(mcpServers.map((s) => s.name));
+        setSelectedPlugins(DEFAULT_PLUGINS.filter((p) => available.has(p)));
+      })();
     }
-  }, [dialogOpen, refreshMcpServers]);
+  }, [dialogOpen, refreshMcpServers, mcpServers]);
 
   const onCreate = useCallback(async () => {
     if (!name.trim()) return;
