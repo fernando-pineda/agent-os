@@ -22,8 +22,24 @@ import type {
   UpdateConfigPayload,
 } from '@/lib/types';
 
-// Direct to the supervisor; the Next rewrite buffers SSE and breaks events.
-const BASE = 'http://localhost:8787';
+// Resolve the supervisor base URL. In the browser, derive it from the page
+// host so a remote deployment (e.g. EC2) works without code changes; the
+// supervisor runs on the same host on port 8787. Override with
+// NEXT_PUBLIC_SUPERVISOR_URL when it lives elsewhere. Direct (not the Next
+// rewrite) because the rewrite buffers SSE and breaks events.
+function resolveBase(): string {
+  if (process.env.NEXT_PUBLIC_SUPERVISOR_URL) {
+    return process.env.NEXT_PUBLIC_SUPERVISOR_URL;
+  }
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:8787`;
+  }
+  return 'http://localhost:8787';
+}
+
+const BASE = resolveBase();
+
+export const SUPERVISOR_BASE = BASE;
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);

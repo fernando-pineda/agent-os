@@ -18,7 +18,12 @@ import {
   useAgentUsage,
   useLivePreview,
 } from '@/components/agent-context';
-import { getMessages, getUsage, subscribeAgentMessages } from '@/lib/api';
+import {
+  getMessages,
+  getUsage,
+  SUPERVISOR_BASE,
+  subscribeAgentMessages,
+} from '@/lib/api';
 
 export type RuntimeProviderProps = {
   children: ReactNode;
@@ -519,7 +524,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
         const controller = new AbortController();
         abortRef.current = controller;
         const res = await fetch(
-          `http://localhost:8787/api/agents/${agentId}/chat`,
+          `${SUPERVISOR_BASE}/api/agents/${agentId}/chat`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -716,7 +721,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const onCancel = useCallback(async () => {
     abortRef.current?.abort();
     try {
-      await fetch(`http://localhost:8787/api/agents/${agentId}/abort`, {
+      await fetch(`${SUPERVISOR_BASE}/api/agents/${agentId}/abort`, {
         method: 'POST',
       });
     } catch (err) {
