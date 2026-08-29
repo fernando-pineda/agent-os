@@ -1,3 +1,4 @@
+export { AGENT_AVATAR_DEFAULT_COLOR, AGENT_CHARACTERS } from './avatars.js';
 export {
   type CompactionResult,
   compactMessages,

@@ -389,3 +389,12 @@ Built-in tools exposed to the agent LLM loop:
 - `task_get` -> required `id`. Returns the task as JSON, or a not-found error when `id` does not exist.
 
 Validation: `status` must be one of the four enum values; `title` must be non-empty.
+
+### Agent management tools (packages/tools)
+
+Built-in tools the agent LLM loop uses to create, list, update, and delete other agents via the supervisor HTTP API (port 8787).
+
+- `agent_list` -> no params. Returns agents visible to the caller (group-scoped when the caller belongs to a group). Each entry includes name, status, model, role, instructions, and plugins.
+- `agent_create` -> required `name` (string), `avatar` (`{ character, color }`). Optional `group`, `workspace`, `role`, `model`, `plugins` (array of MCP server names from `mcp_list`), `instructions` (string, injected into the system prompt every turn), `reminders` (array of strings, injected into the system prompt every turn). The avatar `character` must be one of the 9 canonical characters (`AGENT_CHARACTERS` in `@agent-os/core`): `layer-blue-pyramid-character`, `layer-dark-bat-character`, `layer-green-cactus-character`, `layer-orange-sun-character`, `layer-pink-cloud-character`, `layer-purple-donut-character`, `layer-purple-slime-character`, `layer-teal-blob-character`, `layer-yellow-star-character`. The `color` must be a hex string matching `/^#[0-9a-fA-F]{6}$/`. Invalid avatars cause a 400 on create.
+- `agent_update` -> required `agentId`. Optional `name`, `group`, `role`, `model`, `workspace`, `sandboxed`, `plugins`, `avatar`, `instructions`, `reminders`. Same avatar character/color constraints as `agent_create`, but invalid avatars are silently dropped on update (the supervisor keeps the prior avatar). The tool output includes the returned avatar so the caller can see what stuck. `reminders` with an empty array clears the list.
+- `agent_delete` -> required `agentId`, `confirmName` (must match the agent's exact display name).

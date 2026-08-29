@@ -17,6 +17,7 @@ export interface StatusTracker {
   refreshAgent(config: AgentConfig): void;
   updateStatus(id: string, status: AgentStatus, currentTaskId?: string): void;
   removeAgent(id: string): void;
+  setDefaultModel(model: string): void;
   onChange(listener: () => void): () => void;
   close(): Promise<void>;
   init(): Promise<void>;
@@ -34,6 +35,11 @@ export class StatusTrackerImpl implements StatusTracker {
   private registry: Registry = { agents: [] };
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopped = false;
+  private defaultModel = 'unknown';
+
+  setDefaultModel(model: string): void {
+    this.defaultModel = model;
+  }
 
   async init(): Promise<void> {
     this.registry = await loadRegistry();
@@ -41,7 +47,7 @@ export class StatusTrackerImpl implements StatusTracker {
     for (const config of configs) {
       const entry = await getOrCreateEntry(this.registry, config.id);
       const status = await pollAgent(config, entry.port);
-      const info = toAgentInfo(config, status.status, 'unknown');
+      const info = toAgentInfo(config, status.status, this.defaultModel);
       if (status.currentTaskId) {
         info.currentTaskId = status.currentTaskId;
       }
@@ -71,7 +77,11 @@ export class StatusTrackerImpl implements StatusTracker {
   refreshAgent(config: AgentConfig): void {
     const existing = this.info.get(config.id);
     const status = existing?.status ?? 'stopped';
-    const info = toAgentInfo(config, status, existing?.model ?? 'unknown');
+    const info = toAgentInfo(
+      config,
+      status,
+      existing?.model ?? this.defaultModel,
+    );
     if (existing?.currentTaskId) {
       info.currentTaskId = existing.currentTaskId;
     }
@@ -134,7 +144,7 @@ export class StatusTrackerImpl implements StatusTracker {
         const info = toAgentInfo(
           config,
           health.status,
-          existing?.model ?? 'unknown',
+          existing?.model ?? this.defaultModel,
         );
         if (health.currentTaskId) {
           info.currentTaskId = health.currentTaskId;

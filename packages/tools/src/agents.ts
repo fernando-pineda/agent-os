@@ -1,6 +1,13 @@
-import type { Tool, ToolContext, ToolResult } from '@agent-os/core';
+import {
+  AGENT_CHARACTERS,
+  type Tool,
+  type ToolContext,
+  type ToolResult,
+} from '@agent-os/core';
 
 const SUPERVISOR_BASE = 'http://localhost:8787';
+
+const AVATAR_CHARACTER_DESC = `character (one of: ${AGENT_CHARACTERS.join(', ')})`;
 
 interface AgentListItem {
   id: string;
@@ -59,6 +66,24 @@ function isAvatarObject(value: unknown): value is {
     typeof candidate.character === 'string' &&
     typeof candidate.color === 'string'
   );
+}
+
+// Extract the avatar from a PATCH /api/agents response so the caller can see
+// the effective avatar after the supervisor silently drops invalid ones.
+function parseUpdateResponse(
+  body: string,
+): { avatar?: { character: string; color: string } } | undefined {
+  try {
+    const data = JSON.parse(body) as unknown;
+    if (typeof data !== 'object' || data === null) return undefined;
+    const candidate = data as { avatar?: unknown };
+    if (isAvatarObject(candidate.avatar)) {
+      return { avatar: candidate.avatar };
+    }
+    return {};
+  } catch {
+    return undefined;
+  }
 }
 
 function compactAgent(agent: AgentListItem): Record<string, unknown> {
@@ -165,6 +190,18 @@ export const agentCreate: Tool = {
             character: { type: 'string' },
             color: { type: 'string' },
           },
+          description: `{ ${AVATAR_CHARACTER_DESC}, color (hex string e.g. #7c3aed) }`,
+        },
+        instructions: {
+          type: 'string',
+          description:
+            'Operational instructions for the agent, injected into its system prompt every turn',
+        },
+        reminders: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Persistent reminders injected into the system prompt every turn',
         },
       },
       required: ['name', 'avatar'],
@@ -190,6 +227,13 @@ export const agentCreate: Tool = {
     if (isAvatarObject(args.avatar)) {
       payload.avatar = args.avatar;
     }
+    if (typeof args.instructions === 'string' && args.instructions)
+      payload.instructions = args.instructions;
+    if (
+      Array.isArray(args.reminders) &&
+      args.reminders.every((r) => typeof r === 'string')
+    )
+      payload.reminders = args.reminders;
 
     try {
       const res = await fetch(`${SUPERVISOR_BASE}/api/agents`, {
@@ -262,6 +306,18 @@ export const agentUpdate: Tool = {
             character: { type: 'string' },
             color: { type: 'string' },
           },
+          description: `{ ${AVATAR_CHARACTER_DESC}, color (hex string e.g. #7c3aed) }. Invalid avatars are silently dropped on update; the returned avatar reflects what stuck.`,
+        },
+        instructions: {
+          type: 'string',
+          description:
+            'Operational instructions for the agent, injected into its system prompt every turn',
+        },
+        reminders: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Persistent reminders injected into the system prompt every turn. Empty array clears.',
         },
       },
       required: ['agentId'],
@@ -288,12 +344,19 @@ export const agentUpdate: Tool = {
     if (isAvatarObject(args.avatar)) {
       payload.avatar = args.avatar;
     }
+    if (typeof args.instructions === 'string' && args.instructions)
+      payload.instructions = args.instructions;
+    if (
+      Array.isArray(args.reminders) &&
+      args.reminders.every((r) => typeof r === 'string')
+    )
+      payload.reminders = args.reminders;
 
     if (Object.keys(payload).length === 0) {
       return {
         ok: false,
         output:
-          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed, avatar, plugins',
+          'nothing to update: pass at least one of name, group, role, model, workspace, sandboxed, avatar, plugins, instructions, reminders',
       };
     }
 
@@ -310,7 +373,16 @@ export const agentUpdate: Tool = {
       if (!res.ok) {
         return supervisorError(res.status, body);
       }
-      return { ok: true, output: `Updated agent ${agentId}.\n${body}` };
+      // Surface the returned config so the caller sees the effective avatar,
+      // since the supervisor silently drops invalid avatars on update.
+      const parsed = parseUpdateResponse(body);
+      const avatarLine = parsed?.avatar
+        ? ` avatar=${JSON.stringify(parsed.avatar)}`
+        : '';
+      return {
+        ok: true,
+        output: `Updated agent ${agentId}.${avatarLine}\n${body}`,
+      };
     } catch (err) {
       return errorResult(err);
     }

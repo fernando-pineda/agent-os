@@ -4,7 +4,13 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { URL } from 'node:url';
-import type { AgentAvatar, AgentInfo, McpServerConfig } from '@agent-os/core';
+import {
+  AGENT_AVATAR_DEFAULT_COLOR,
+  AGENT_CHARACTERS,
+  type AgentAvatar,
+  type AgentInfo,
+  type McpServerConfig,
+} from '@agent-os/core';
 import { createGroup, deleteGroup, loadGroups } from './groups.js';
 import { installLaunchdAgent, uninstallLaunchdAgent } from './launchd.js';
 import {
@@ -347,7 +353,7 @@ async function handle(
       // Avatar is required on create; any character is accepted.
       input.avatar = {
         character: AGENT_CHARACTERS[0]!,
-        color: '#27272a',
+        color: AGENT_AVATAR_DEFAULT_COLOR,
       };
     }
     if (body.plugins !== undefined) {
@@ -496,10 +502,12 @@ async function handle(
   if (matchStartStop && req.method === 'POST') {
     const id = decodeURIComponent(matchStartStop[1]!);
     const action = matchStartStop[2]!;
+    const config = await readGlobalConfig();
+    const defaultModel = config?.defaultModel ?? 'unknown-model';
     const result =
       action === 'start'
-        ? await startAgent(registry, id)
-        : await stopAgent(registry, id);
+        ? await startAgent(registry, id, defaultModel)
+        : await stopAgent(registry, id, defaultModel);
     statusTracker.updateStatus(id, action === 'stop' ? 'stopped' : 'starting');
     if (!result) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -897,17 +905,6 @@ function maskApiKey(key: string): string {
   return `••••${key.slice(-4)}`;
 }
 
-const AGENT_CHARACTERS = [
-  'layer-blue-pyramid-character',
-  'layer-dark-bat-character',
-  'layer-green-cactus-character',
-  'layer-orange-sun-character',
-  'layer-pink-cloud-character',
-  'layer-purple-donut-character',
-  'layer-purple-slime-character',
-  'layer-teal-blob-character',
-  'layer-yellow-star-character',
-];
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 async function validatePluginNames(value: unknown): Promise<string | null> {

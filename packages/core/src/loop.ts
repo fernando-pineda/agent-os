@@ -61,6 +61,7 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     'agent_create requires avatar: { character, color }. Pick any valid character and color that fit the agent.',
     'Valid characters: layer-blue-pyramid-character, layer-dark-bat-character, layer-green-cactus-character, layer-orange-sun-character, layer-pink-cloud-character, layer-purple-donut-character, layer-purple-slime-character, layer-teal-blob-character, layer-yellow-star-character.',
     'Valid colors: hex strings, e.g. #7c3aed (purple), #0d9488 (teal), #27272a (zinc).',
+    'agent_create and agent_update also accept instructions (string) and reminders (array of strings), injected into the system prompt every turn.',
     'Manage MCP plugin servers with mcp_list, mcp_create, mcp_update, mcp_delete and mcp_status. Activate plugins per agent via the plugins field of agent_create / agent_update (names from mcp_list).',
     'Track your work with task_create, task_update, task_list and task_get so you remember ongoing tasks across messages.',
   ].join('\n');

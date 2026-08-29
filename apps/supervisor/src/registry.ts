@@ -333,6 +333,7 @@ export async function createAgent(
 export async function startAgent(
   registry: Registry,
   id: string,
+  defaultModel = 'unknown',
 ): Promise<AgentInfo | null> {
   const config = await readAgentConfig(id);
   if (!config) return null;
@@ -343,14 +344,15 @@ export async function startAgent(
   await saveRegistry(registry);
   const spawnResult = await spawnAgentProcess(registry, id, workspace);
   if (spawnResult.error) {
-    return toAgentInfo(config, 'error', 'unknown');
+    return toAgentInfo(config, 'error', defaultModel);
   }
-  return toAgentInfo(config, entry.status, 'unknown');
+  return toAgentInfo(config, entry.status, defaultModel);
 }
 
 export async function stopAgent(
   registry: Registry,
   id: string,
+  defaultModel = 'unknown',
 ): Promise<AgentInfo | null> {
   const config = await readAgentConfig(id);
   if (!config) return null;
@@ -385,7 +387,7 @@ export async function stopAgent(
   entry.status = 'stopped';
   entry.manualStop = true;
   await saveRegistry(registry);
-  return toAgentInfo(config, 'stopped', 'unknown');
+  return toAgentInfo(config, 'stopped', defaultModel);
 }
 
 // Resolve the agent dist main.js path so pgrep can match it. Mirrors the
