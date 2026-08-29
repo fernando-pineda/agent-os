@@ -27,7 +27,10 @@ export const messageAgent: Tool = {
     }
 
     try {
-      const confirmation = await ctx.sendAgentMessage(toAgentId, message);
+      const depth = (ctx.replyDepth ?? 0) + 1;
+      const confirmation = await ctx.sendAgentMessage(toAgentId, message, {
+        replyDepth: depth,
+      });
       return { ok: true, output: confirmation };
     } catch (err) {
       return {

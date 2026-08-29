@@ -173,8 +173,12 @@ export function useAgentUsage(): {
   return { usage: ctx.usage, setUsage: ctx.setUsage };
 }
 
-export function useModelsFeed(): { models: ModelItem[] } {
-  return { models: useContext(AgentContext).models };
+export function useModelsFeed(): {
+  models: ModelItem[];
+  refreshModels: () => void;
+} {
+  const ctx = useContext(AgentContext);
+  return { models: ctx.models, refreshModels: ctx.refreshModels };
 }
 
 export function useGroupsFeed(): {

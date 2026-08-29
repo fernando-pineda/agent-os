@@ -221,7 +221,13 @@ export async function deleteAgent(
   await saveRegistry(registry);
 
   await rm(join(AGENTS_ROOT, id), { recursive: true, force: true });
-  // Never removes the workspace user home; only the supervisor-owned config dir.
+  // Also drop the supervisor-owned dev-home (thread, memory, outbox, usage)
+  // so a recreated agent with the same id starts clean. Only dev-homes under
+  // .agent-os are touched; real workspace user homes are never removed.
+  await rm(join(homedir(), '.agent-os', 'dev-homes', id), {
+    recursive: true,
+    force: true,
+  });
 }
 
 export async function createAgent(

@@ -9,8 +9,10 @@ export function resetModelCache(): void {
   modelCache = undefined;
 }
 
+type Provider = 'fireworks' | 'zai';
+
 interface OnboardingInput {
-  provider: 'fireworks';
+  provider: Provider;
   apiKey: string;
   defaultModel: string;
 }
@@ -63,6 +65,7 @@ export async function onboard(input: OnboardingInput): Promise<void> {
 }
 
 export async function updateGlobalConfig(patch: {
+  provider?: Provider;
   apiKey?: string;
   defaultModel?: string;
   reminders?: string[];
@@ -70,6 +73,9 @@ export async function updateGlobalConfig(patch: {
   const current = await readGlobalConfig();
   if (!current) {
     throw new Error('Not configured');
+  }
+  if (patch.provider !== undefined) {
+    current.provider = patch.provider;
   }
   if (patch.apiKey !== undefined && patch.apiKey !== '') {
     current.apiKey = patch.apiKey;
@@ -101,6 +107,45 @@ export async function listModels(): Promise<{
   const config = await readGlobalConfig();
   if (!config) {
     return { models: [], warning: 'Not configured' };
+  }
+
+  if (config.provider === 'zai') {
+    // z.ai has no list-models endpoint; keep in sync with the coding plan's
+    // current GLM lineup.
+    const entries: ModelEntry[] = [
+      {
+        id: 'GLM-5.3',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 1000000,
+      },
+      {
+        id: 'GLM-5.3-Flash',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 1000000,
+      },
+      {
+        id: 'GLM-5.2',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 1000000,
+      },
+      {
+        id: 'GLM-4.7',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 200000,
+      },
+      {
+        id: 'GLM-4.6',
+        supportsTools: true,
+        serverless: true,
+        contextLength: 200000,
+      },
+    ];
+    modelCache = { fetchedAt: now, models: entries };
+    return { models: entries };
   }
 
   try {

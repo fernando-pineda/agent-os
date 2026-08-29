@@ -46,6 +46,7 @@ export interface ServerDeps {
   homeDir: string;
   agent: AgentConfig;
   model: string;
+  provider?: 'fireworks' | 'zai';
   llm: LLMClient;
   tools: Tool[];
   status: AgentStatus;
@@ -57,6 +58,7 @@ export interface ServerDeps {
     message: string,
     opts?: { replyDepth?: number },
   ) => Promise<string>;
+  onMessagesPersisted?: (messages: UIMessage[]) => void;
   scheduler?: AutomationScheduler;
   onPluginsReload?: () => Promise<Tool[]>;
 }
@@ -91,6 +93,12 @@ interface RunControls {
   markRunning: (value: boolean) => void;
 }
 
+// Max hops in an agent-to-agent reply chain before the receiver is told to stop.
+const MAX_AGENT_REPLY_DEPTH = 6;
+// Turn reminder appended to inbound replies so the agent weighs ending it.
+const REPLY_TURN_REMINDER =
+  '[system: this is a reply in an ongoing exchange. If it still carries a task or question, answer it and send the answer back with message_agent as usual. Only skip message_agent when it is purely social (farewell, acknowledgment, thanks) with nothing left to do.]';
+
 export function createAgentServer(deps: ServerDeps): AgentServer {
   let status = deps.status;
   let currentTaskId = deps.currentTaskId;
@@ -100,6 +108,18 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   let tools = deps.tools;
   const server = createServer();
   let _listenPort: number | undefined;
+  const messageListeners = new Set<ServerResponse>();
+
+  const notifyMessages = (messages: UIMessage[]) => {
+    const payload = `data: ${JSON.stringify({ messages })}\n\n`;
+    for (const l of messageListeners) {
+      try {
+        l.write(payload);
+      } catch {
+        messageListeners.delete(l);
+      }
+    }
+  };
 
   const setStatus = (newStatus: AgentStatus) => {
     status = newStatus;
@@ -118,6 +138,18 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       if (method === 'GET' && url === '/health') {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, status, currentTaskId }));
+        return;
+      }
+
+      if (method === 'GET' && url === '/messages/stream') {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        res.write('retry: 2000\n\n');
+        messageListeners.add(res);
+        req.on('close', () => messageListeners.delete(res));
         return;
       }
 
@@ -143,11 +175,15 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         }
         const body = (await json(req)) as { messages?: UIMessage[] };
         const messages = body.messages ?? [];
-        const response = await handleChat(messages, deps, {
-          setStatus,
-          setCurrentTaskId,
-          markRunning,
-        });
+        const response = await handleChat(
+          messages,
+          { ...deps, onMessagesPersisted: notifyMessages },
+          {
+            setStatus,
+            setCurrentTaskId,
+            markRunning,
+          },
+        );
         const headers: Record<string, string> = {};
         response.headers.forEach((value, key) => {
           headers[key] = value;
@@ -202,11 +238,15 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         if (typeof body.inReplyTo === 'string') {
           inboxBody.inReplyTo = body.inReplyTo;
         }
-        const result = await handleInbox(inboxBody, deps, {
-          setStatus,
-          setCurrentTaskId,
-          markRunning,
-        });
+        const result = await handleInbox(
+          inboxBody,
+          { ...deps, onMessagesPersisted: notifyMessages },
+          {
+            setStatus,
+            setCurrentTaskId,
+            markRunning,
+          },
+        );
         res.writeHead(202, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
         return;
@@ -530,6 +570,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             llm: serverDeps.llm,
             tools,
             model: serverDeps.model,
+            ...(serverDeps.provider ? { provider: serverDeps.provider } : {}),
             messages: chatMessages,
             agentId: serverDeps.agentId,
             ...(agentName ? { agentName } : {}),
@@ -619,10 +660,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       : depth >= MAX_AGENT_REPLY_DEPTH - 1
         ? `\n\n[system: this exchange is about to hit the reply limit. Wrap it up; reply only if truly necessary.]`
         : '';
+    const turnReminder = body.inReplyTo ? `\n\n${REPLY_TURN_REMINDER}` : '';
     const chatMessages: ChatMessage[] = [
       {
         role: 'user',
-        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}${closingNote}`,
+        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}${closingNote}${turnReminder}`,
       },
     ];
 
@@ -672,18 +714,66 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         llm: serverDeps.llm,
         tools,
         model: serverDeps.model,
+        ...(serverDeps.provider ? { provider: serverDeps.provider } : {}),
         messages: chatMessages,
         agentId: serverDeps.agentId,
         ...(agentName ? { agentName } : {}),
         ...(agentRole ? { role: agentRole } : {}),
         ...(agentInstructions ? { instructions: agentInstructions } : {}),
         ...(reminders.length > 0 ? { reminders } : {}),
-        buildContext: serverDeps.buildContext,
+        buildContext: (signal) => {
+          const ctx = serverDeps.buildContext(signal);
+          const overridden: ToolContext = {
+            ...ctx,
+            replyDepth: body.replyDepth,
+          };
+          if (body.atCap) {
+            overridden.sendAgentMessage = async () =>
+              'Reply limit reached for this exchange; not sent. Respond in plain text.';
+          }
+          return overridden;
+        },
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {
           handleStreamEvent(event, undefined, toolContexts, segments);
         },
       });
+      // Auto-deliver: if the turn did real work (used a non-messaging tool) and
+      // ended with text but never called message_agent back, that answer would
+      // be lost (plain text is not delivered between agents). Forward it to the
+      // sender. Skip when nothing but text was produced (a social close-out is
+      // local, not a reply) and at the reply cap, where the point is to stop.
+      if (!body.atCap) {
+        const calledBack = segments.some(
+          (s) => s.kind === 'tool' && s.toolName === 'message_agent',
+        );
+        const didWork = segments.some(
+          (s) => s.kind === 'tool' && s.toolName !== 'message_agent',
+        );
+        const finalText = [...segments]
+          .reverse()
+          .find((s) => s.kind === 'text' && s.text && s.text.trim())
+          ?.text?.trim();
+        if (!calledBack && didWork && finalText) {
+          const nextDepth = body.replyDepth + 1;
+          const delivered = await serverDeps.sendAgentMessage(
+            body.fromAgentId,
+            finalText,
+            { replyDepth: nextDepth },
+          );
+          console.log(`Auto-delivered inbox reply to ${body.fromAgentId}`, {
+            depth: nextDepth,
+            delivered,
+          });
+          segments.push({
+            kind: 'tool',
+            toolCallId: `auto-${crypto.randomUUID()}`,
+            toolName: 'message_agent',
+            args: { toAgentId: body.fromAgentId, message: finalText },
+            result: delivered,
+          });
+        }
+      }
       // Persist the inbound message so the UI can surface it and the model
       // sees it in context after restarts. Replies go out via message_agent,
       // not an auto-forward, so no replyToAgentId is set here.
@@ -880,6 +970,7 @@ async function persistTurn(
   }
   flush();
   await saveThread(deps.homeDir, messages);
+  deps.onMessagesPersisted?.(messages);
 }
 
 export async function sendAgentMessageHttp(

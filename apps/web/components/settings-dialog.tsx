@@ -27,6 +27,7 @@ import {
   getConfig,
   getMcpServers,
   getMcpStatuses,
+  getModels,
   updateConfig,
   updateMcpServer,
 } from '@/lib/api';
@@ -42,13 +43,15 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const { models } = useModelsFeed();
+  const { models, refreshModels } = useModelsFeed();
 
   const [config, setConfig] = useState<GlobalConfigStatus | null>(null);
+  const [provider, setProvider] = useState<'fireworks' | 'zai'>('fireworks');
   const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [reminders, setReminders] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
   const [providerError, setProviderError] = useState('');
   const [saved, setSaved] = useState(false);
 
@@ -98,6 +101,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     getConfig()
       .then((cfg) => {
         setConfig(cfg);
+        setProvider(cfg.provider);
         setDefaultModel(cfg.defaultModel);
         setReminders(cfg.reminders ?? []);
       })
@@ -136,6 +140,34 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setSaving(false);
     }
   }, [apiKey, defaultModel, reminders]);
+
+  const onProviderChange = useCallback(
+    async (next: 'fireworks' | 'zai') => {
+      if (next === provider) return;
+      setProviderSaving(true);
+      setProviderError('');
+      try {
+        const updated = await updateConfig({ provider: next });
+        setConfig(updated);
+        setProvider(updated.provider);
+        setDefaultModel(updated.defaultModel);
+        // Models feed is cached server-side; refetch to get the new provider's list.
+        const list = await getModels();
+        refreshModels();
+        if (list.length > 0) {
+          setDefaultModel(list[0]?.id ?? updated.defaultModel);
+        }
+      } catch (err) {
+        setProviderError(
+          err instanceof Error ? err.message : 'Failed to switch provider',
+        );
+        setProvider(config?.provider ?? 'fireworks');
+      } finally {
+        setProviderSaving(false);
+      }
+    },
+    [provider, config, refreshModels],
+  );
 
   const openNewForm = useCallback(() => {
     setEditingServer(null);
@@ -210,9 +242,26 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <label className="mb-1 block text-xs text-zinc-400">
                   Provider
                 </label>
-                <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-300">
-                  fireworks
+                <div className="flex gap-2">
+                  {(['fireworks', 'zai'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => onProviderChange(p)}
+                      disabled={providerSaving}
+                      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                        provider === p
+                          ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                          : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {p === 'zai' ? 'z.ai' : 'Fireworks'}
+                    </button>
+                  ))}
                 </div>
+                {providerSaving && (
+                  <p className="mt-1 text-xs text-zinc-500">Switching...</p>
+                )}
               </div>
 
               <div>

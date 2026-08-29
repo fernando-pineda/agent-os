@@ -17,7 +17,7 @@ import {
   useAgentUsage,
   useLivePreview,
 } from '@/components/agent-context';
-import { getMessages, getUsage } from '@/lib/api';
+import { getMessages, getUsage, subscribeAgentMessages } from '@/lib/api';
 
 export type RuntimeProviderProps = {
   children: ReactNode;
@@ -74,17 +74,7 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
   if (m.text) {
     content.push({ type: 'text', text: m.text });
   }
-  for (const tp of m.toolParts ?? []) {
-    content.push({
-      type: 'tool-call',
-      toolCallId: tp.toolCallId,
-      toolName: tp.toolName,
-      args: tp.args,
-      argsText: tp.argsText,
-      ...(tp.result !== undefined && { result: tp.result }),
-      ...(tp.isError !== undefined && { isError: tp.isError }),
-    } as Part);
-  }
+  // Tool calls are hidden from the thread; only agent-messaging chips render.
   if (content.length === 0) {
     content.push({ type: 'text', text: '' });
   }
@@ -180,9 +170,8 @@ function buildOrderedMsgs(
       (p as { type?: string }).type === 'tool-call';
     if (isTool) {
       const tp = extractToolParts([p]);
-      if (tp.length === 0) continue; // message_agent renders as a chip
+      // Hidden from the thread; only message_agent renders, as a chip.
       flushText();
-      out.push({ id: `${id}-tc${out.length}`, role, text: '', toolParts: tp });
       prevWasTool = true;
       continue;
     }
@@ -258,6 +247,57 @@ function extractRepliedToChip(m: {
   return { toAgentId: id };
 }
 
+// Parse persisted UIMessages into render Msgs. Shared by initial load and
+// the live message stream.
+function parseThreadMessages(ui: unknown[]): Msg[] {
+  const seenIds = new Set<string>();
+  return (ui as Record<string, unknown>[]).flatMap((m, i) => {
+    let id = (m.id as string | undefined) ?? `m-${i}`;
+    while (seenIds.has(id)) id = `${id}-${i}`;
+    seenIds.add(id);
+    const role = m.role as Msg['role'];
+    const parts = m.parts as unknown;
+    const out: Msg[] = [];
+    const inboxChip = extractInboxChip(m as never);
+    if (inboxChip) {
+      out.push({
+        id: `${id}-inbox`,
+        role: 'assistant',
+        text: '',
+        inboxAgent: inboxChip,
+      });
+      return out;
+    }
+    const chips = extractMessageAgentChips(parts);
+    chips.forEach((chip, j) => {
+      out.push({
+        id: `${id}-chip-${j}`,
+        role: 'assistant',
+        text: '',
+        messageAgent: chip,
+      });
+    });
+    const repliedToChip = extractRepliedToChip(m as never);
+    if (repliedToChip) {
+      out.push({
+        id: `${id}-replied`,
+        role: 'assistant',
+        text: '',
+        repliedToAgent: repliedToChip,
+      });
+    }
+    const ordered = buildOrderedMsgs(id, role, parts);
+    if (ordered.length > 0) {
+      out.push(...ordered);
+    } else if (chips.length === 0) {
+      const text =
+        extractText(parts) || (m as { content?: string }).content || '';
+      out.push({ id, role, text, toolParts: [] });
+    }
+    return out;
+  });
+}
+
 export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -277,56 +317,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     getMessages(agentId)
       .then((ui) => {
         if (cancelled) return;
-        const seenIds = new Set<string>();
-        setMessages(
-          ui.flatMap((m, i) => {
-            let id = m.id ?? `m-${i}`;
-            while (seenIds.has(id)) id = `${id}-${i}`;
-            seenIds.add(id);
-            const out: Msg[] = [];
-            const inboxChip = extractInboxChip(m);
-            if (inboxChip) {
-              // Chip replaces the raw text message; the assistant's reaction follows.
-              out.push({
-                id: `${id}-inbox`,
-                role: 'assistant',
-                text: '',
-                inboxAgent: inboxChip,
-              });
-              return out;
-            }
-            const chips = extractMessageAgentChips(m.parts);
-            // One chip message per persisted message_agent call.
-            chips.forEach((chip, j) => {
-              out.push({
-                id: `${id}-chip-${j}`,
-                role: 'assistant',
-                text: '',
-                messageAgent: chip,
-              });
-            });
-            const repliedToChip = extractRepliedToChip(m);
-            if (repliedToChip) {
-              out.push({
-                id: `${id}-replied`,
-                role: 'assistant',
-                text: '',
-                repliedToAgent: repliedToChip,
-              });
-            }
-            const ordered = buildOrderedMsgs(id, m.role, m.parts);
-            if (ordered.length > 0) {
-              out.push(...ordered);
-            } else if (chips.length === 0) {
-              const text =
-                extractText(m.parts) ||
-                (m as { content?: string }).content ||
-                '';
-              out.push({ id, role: m.role, text, toolParts: [] });
-            }
-            return out;
-          }),
-        );
+        setMessages(parseThreadMessages(ui as unknown[]));
         setLoaded(true);
       })
       .catch(() => {
@@ -340,87 +331,24 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     };
   }, [agentId, setUsage]);
 
-  // When the SSE feed reports this agent working while the chat is idle,
-  // an inbox message arrived. Re-fetch the thread and surface it as a chip.
-  const agents = useAgentsFeed();
-  const agentStatus = agents.find((a) => a.id === agentId)?.status;
-  const knownIdsRef = useRef<Set<string> | null>(null);
-  const fetchingRef = useRef(false);
-  const wasRunningRef = useRef(false);
-
+  // Live message stream: the agent pushes its persisted thread on every
+  // turn (including inbound agent messages), so the UI re-renders without a
+  // manual refresh. Skip while a local run is streaming to avoid clobbering
+  // the in-progress optimistic state.
+  const isRunningRef = useRef(false);
+  isRunningRef.current = isRunning;
   useEffect(() => {
     if (!loaded) return;
-    const known = knownIdsRef.current;
-    if (known === null) {
-      knownIdsRef.current = new Set(messages.map((m) => m.id));
-      return;
-    }
-    for (const m of messages) known.add(m.id);
-    const wasRunning = wasRunningRef.current;
-    wasRunningRef.current = isRunning;
-    if (isRunning || fetchingRef.current) return;
-    // Skip the inbox refetch right after a local run; the turn is already in
-    // the live thread and re-fetching would duplicate it.
-    if (wasRunning) return;
-    if (agentStatus !== 'busy' && agentStatus !== 'starting') return;
-    fetchingRef.current = true;
-    getMessages(agentId)
-      .then((ui) => {
-        const additions: Msg[] = [];
-        const seen = new Set(known);
-        ui.forEach((m, i) => {
-          let id = m.id ?? `m-${i}`;
-          while (seen.has(id)) id = `${id}-${i}`;
-          seen.add(id);
-          const inboxChip = extractInboxChip(m);
-          if (inboxChip) {
-            additions.push({
-              id: `${id}-inbox`,
-              role: 'assistant',
-              text: '',
-              inboxAgent: inboxChip,
-            });
-          } else {
-            const chips = extractMessageAgentChips(m.parts);
-            chips.forEach((chip, j) => {
-              additions.push({
-                id: `${id}-chip-${j}`,
-                role: 'assistant',
-                text: '',
-                messageAgent: chip,
-              });
-            });
-            const repliedToChip = extractRepliedToChip(m);
-            if (repliedToChip) {
-              additions.push({
-                id: `${id}-replied`,
-                role: 'assistant',
-                text: '',
-                repliedToAgent: repliedToChip,
-              });
-            }
-            const ordered = buildOrderedMsgs(id, m.role, m.parts);
-            if (ordered.length > 0) {
-              additions.push(...ordered);
-            } else if (chips.length === 0) {
-              const text =
-                extractText(m.parts) ||
-                (m as { content?: string }).content ||
-                '';
-              additions.push({ id, role: m.role, text, toolParts: [] });
-            }
-          }
-        });
-        for (const a of additions) known.add(a.id);
-        if (additions.length > 0) {
-          setMessages((prev) => [...prev, ...additions]);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        fetchingRef.current = false;
-      });
-  }, [agentStatus, agentId, isRunning, loaded, messages]);
+    const unsubscribe = subscribeAgentMessages(
+      agentId,
+      (raw) => {
+        if (isRunningRef.current) return;
+        setMessages(parseThreadMessages(raw));
+      },
+      (err) => console.error(err),
+    );
+    return unsubscribe;
+  }, [agentId, loaded]);
 
   const onNew = useCallback(
     async (message: {
@@ -546,7 +474,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                   argsText: '',
                 };
                 toolMap.set(d.toolCallId, tp);
-                startNew([tp]);
+                // Hidden from the thread; track state only, no message added.
               }
               setLivePreview(agentId, `Running ${d.toolName}...`);
             } else if (line.startsWith('c:')) {

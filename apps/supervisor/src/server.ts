@@ -103,9 +103,21 @@ async function handle(
   }
 
   if (pathname === '/api/onboarding' && req.method === 'POST') {
-    const body = await readJson(req);
+    const body = (await readJson(req)) as Record<string, unknown>;
+    const provider = body.provider;
+    if (provider !== 'fireworks' && provider !== 'zai') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({ error: "provider must be 'fireworks' or 'zai'" }),
+      );
+      return;
+    }
     await onboard(
-      body as { provider: 'fireworks'; apiKey: string; defaultModel: string },
+      body as {
+        provider: 'fireworks' | 'zai';
+        apiKey: string;
+        defaultModel: string;
+      },
     );
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -134,10 +146,21 @@ async function handle(
   if (pathname === '/api/config' && req.method === 'PATCH') {
     const body = (await readJson(req)) as Record<string, unknown>;
     const patch: {
+      provider?: 'fireworks' | 'zai';
       apiKey?: string;
       defaultModel?: string;
       reminders?: string[];
     } = {};
+    if (body.provider !== undefined) {
+      if (body.provider !== 'fireworks' && body.provider !== 'zai') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: "provider must be 'fireworks' or 'zai'" }),
+        );
+        return;
+      }
+      patch.provider = body.provider as 'fireworks' | 'zai';
+    }
     if (typeof body.apiKey === 'string') patch.apiKey = body.apiKey;
     if (typeof body.defaultModel === 'string')
       patch.defaultModel = body.defaultModel;
@@ -357,6 +380,11 @@ async function handle(
       res.end(JSON.stringify(result));
       return;
     }
+    // Push the new agent to SSE subscribers immediately.
+    if (result.agent) {
+      const createdConfig = await readAgentConfig(result.agent.id);
+      if (createdConfig) statusTracker.refreshAgent(createdConfig);
+    }
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result.agent));
     return;
@@ -503,6 +531,57 @@ async function handle(
       clearInterval(heartbeat);
       unsubscribe();
     });
+    return;
+  }
+
+  const matchAgentMessagesStream =
+    /^\/api\/agents\/([^/]+)\/messages\/stream$/.exec(pathname);
+  if (matchAgentMessagesStream && req.method === 'GET') {
+    const id = decodeURIComponent(matchAgentMessagesStream[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const upstream = await fetch(
+        `http://localhost:${agentPort}/messages/stream`,
+      );
+      if (!upstream.ok || !upstream.body) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Agent stream unavailable' }));
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      const reader = upstream.body.getReader();
+      const pump = async (): Promise<void> => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      };
+      req.on('close', () => {
+        void reader.cancel().catch(() => undefined);
+      });
+      await pump();
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } else {
+        res.end();
+      }
+    }
     return;
   }
 

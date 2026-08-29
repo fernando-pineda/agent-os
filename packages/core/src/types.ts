@@ -1,5 +1,5 @@
 export interface GlobalConfig {
-  provider: 'fireworks';
+  provider: 'fireworks' | 'zai';
   apiKey: string;
   defaultModel: string;
   createdAt: string;
@@ -133,6 +133,8 @@ export interface ToolContext {
     message: string,
     opts?: { replyDepth?: number },
   ) => Promise<string>;
+  /** Depth of the current agent-to-agent reply chain, for loop guards. */
+  replyDepth?: number;
 }
 
 export interface Tool {

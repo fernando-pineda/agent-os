@@ -1,5 +1,5 @@
-import { appendFile, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { findPortFor } from './registry.js';
 
 export interface OutboxEntry {
@@ -22,8 +22,10 @@ export function appendOutbox(
   entry: OutboxEntry,
 ): Promise<void> {
   const next = queue.then(async () => {
+    const path = outboxPath(homeDir);
+    await mkdir(dirname(path), { recursive: true });
     const line = JSON.stringify(entry);
-    await appendFile(outboxPath(homeDir), `${line}\n`, 'utf-8');
+    await appendFile(path, `${line}\n`, 'utf-8');
   });
   queue = next.catch(() => undefined);
   return next;
@@ -35,6 +37,7 @@ export function removeOutbox(
 ): Promise<void> {
   const next = queue.then(async () => {
     const path = outboxPath(homeDir);
+    await mkdir(dirname(path), { recursive: true });
     let raw: string;
     try {
       raw = await readFile(path, 'utf-8');

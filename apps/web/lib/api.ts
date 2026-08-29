@@ -230,6 +230,31 @@ export function subscribeAgentEvents(
   return () => source.close();
 }
 
+export function subscribeAgentMessages(
+  agentId: string,
+  onSnapshot: (messages: unknown[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const url = `${BASE}/api/agents/${encodeURIComponent(agentId)}/messages/stream`;
+  const source = new EventSource(url);
+  source.addEventListener('message', (event) => {
+    try {
+      const parsed = JSON.parse(event.data) as { messages?: unknown[] };
+      onSnapshot(parsed.messages ?? []);
+    } catch (err) {
+      onError?.(
+        err instanceof Error
+          ? err
+          : new Error('Failed to parse message stream'),
+      );
+    }
+  });
+  source.addEventListener('error', () => {
+    onError?.(new Error('Message stream SSE error'));
+  });
+  return () => source.close();
+}
+
 export async function getAutomations(agentId: string): Promise<Automation[]> {
   const res = await fetchJson<AutomationsResponse>(
     `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations`,

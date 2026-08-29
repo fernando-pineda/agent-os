@@ -20,7 +20,7 @@ These contracts are frozen before the build swarm. All builders must implement a
 
 ```ts
 interface GlobalConfig {
-  provider: "fireworks";
+  provider: "fireworks" | "zai";
   apiKey: string;
   defaultModel: string;
   createdAt: string; // ISO 8601
@@ -244,9 +244,9 @@ type AgentCommand = { type: "cancel"; taskId: string };
 ## Supervisor HTTP API
 
 - `GET /api/onboarding/status` -> `{ configured: boolean }`
-- `POST /api/onboarding` body `{ provider: "fireworks", apiKey: string, defaultModel: string }` -> writes `~/.agent-os/config.json`, returns `{ ok: true }`
-- `GET /api/config` -> `{ provider: "fireworks", apiKey: string (masked, last 4 chars), defaultModel: string, reminders?: string[] }` (404 `{ error: "not configured" }` if no config)
-- `PATCH /api/config` body `{ apiKey?: string, defaultModel?: string, reminders?: string[] }` -> updates config (apiKey only overwritten when non-empty; reminders undefined means unchanged, [] clears), returns masked config same as GET
+- `POST /api/onboarding` body `{ provider: "fireworks" | "zai", apiKey: string, defaultModel: string }` -> writes `~/.agent-os/config.json`, returns `{ ok: true }`
+- `GET /api/config` -> `{ provider: "fireworks" | "zai", apiKey: string (masked, last 4 chars), defaultModel: string, reminders?: string[] }` (404 `{ error: "not configured" }` if no config)
+- `PATCH /api/config` body `{ provider?: "fireworks" | "zai", apiKey?: string, defaultModel?: string, reminders?: string[] }` -> updates config (provider validated to "fireworks" or "zai"; apiKey only overwritten when non-empty; reminders undefined means unchanged, [] clears), returns masked config same as GET
 - `GET /api/mcp` -> `{ servers: McpServerConfig[] }` (empty array if none)
 - `POST /api/mcp` body `McpServerConfig` -> validates, rejects duplicate name with 409, persists to `~/.agent-os/config.json`, returns 201 with the created server
 - `PATCH /api/mcp/:name` body `Partial<McpServerConfig>` -> updates fields, rename allowed if new name not taken, 404 if not found, returns updated server

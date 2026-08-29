@@ -8,7 +8,11 @@ import type {
   Tool,
   ToolContext,
 } from '@agent-os/core';
-import { FireworksLLMClient, MockLLMClient } from '@agent-os/core';
+import {
+  FireworksLLMClient,
+  MockLLMClient,
+  ZaiLLMClient,
+} from '@agent-os/core';
 import { wrapWithSandbox } from '@agent-os/sandbox';
 import { defaultTools, TmuxSession } from '@agent-os/tools';
 import { createAutomationScheduler } from './automations.js';
@@ -53,7 +57,9 @@ async function main(): Promise<void> {
   const llm: LLMClient =
     process.env.AGENT_OS_MOCK_LLM === '1'
       ? new MockLLMClient()
-      : new FireworksLLMClient(apiKey);
+      : config.provider === 'zai'
+        ? new ZaiLLMClient(apiKey)
+        : new FireworksLLMClient(apiKey);
 
   console.log(
     `Agent ${agentId} workspace ${workspace} home ${homeDir} model ${model} port ${resolvedPort}`,
@@ -92,6 +98,7 @@ async function main(): Promise<void> {
     homeDir,
     agent,
     model,
+    provider: config.provider,
     llm,
     tools: allTools,
     status: 'starting',
@@ -194,7 +201,8 @@ function buildContext(
     signal,
     group: agent.group,
     env: buildEnv(agent),
-    sendAgentMessage: (to, msg) => sendAgentMessageHttp(to, msg, homeDir),
+    sendAgentMessage: (to, msg, opts) =>
+      sendAgentMessageHttp(to, msg, homeDir, opts?.replyDepth ?? 0),
   };
 }
 
@@ -230,6 +238,7 @@ async function provisionGit(
   homeDir: string,
 ): Promise<void> {
   if (!git) return;
+  await mkdir(homeDir, { recursive: true });
   if (git.userName && git.userEmail) {
     const gitconfig = `[user]\n\tname = ${git.userName}\n\temail = ${git.userEmail}\n`;
     await writeFile(join(homeDir, '.gitconfig'), gitconfig, 'utf-8');
@@ -241,6 +250,7 @@ async function provisionGit(
     });
   }
   if (git.sshKeyPath) {
+    await mkdir(join(homeDir, '.ssh'), { recursive: true });
     await writeFile(
       join(homeDir, '.ssh', 'config'),
       `IdentityFile ${git.sshKeyPath}\n`,

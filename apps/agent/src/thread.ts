@@ -1,5 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { ChatMessage, ToolCall } from '@agent-os/core';
 
 export type UIMessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -63,6 +63,7 @@ export async function saveUsage(
   usage: AgentUsage,
 ): Promise<void> {
   const tmp = `${usagePath(homeDir)}.tmp`;
+  await mkdir(dirname(tmp), { recursive: true });
   await writeFile(tmp, JSON.stringify(usage), 'utf-8');
   await rename(tmp, usagePath(homeDir));
 }
@@ -89,6 +90,7 @@ export async function saveThread(
 ): Promise<void> {
   const path = threadPath(homeDir);
   const tempPath = `${path}.tmp`;
+  await mkdir(dirname(tempPath), { recursive: true });
   await writeFile(tempPath, JSON.stringify(messages, null, 2), 'utf-8');
   await rename(tempPath, path);
 }

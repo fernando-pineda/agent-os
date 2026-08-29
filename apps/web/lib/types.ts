@@ -34,7 +34,7 @@ export interface OnboardingStatus {
 }
 
 export interface OnboardingPayload {
-  provider: 'fireworks';
+  provider: 'fireworks' | 'zai';
   apiKey: string;
   defaultModel: string;
 }
@@ -79,13 +79,14 @@ export interface UpdateAgentPayload {
 }
 
 export interface GlobalConfigStatus {
-  provider: 'fireworks';
+  provider: 'fireworks' | 'zai';
   apiKey: string;
   defaultModel: string;
   reminders?: string[];
 }
 
 export interface UpdateConfigPayload {
+  provider?: 'fireworks' | 'zai';
   apiKey?: string;
   defaultModel?: string;
   reminders?: string[];

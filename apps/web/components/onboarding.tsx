@@ -7,13 +7,24 @@ import { Input } from '@/components/ui/input';
 import { getModels, postOnboarding } from '@/lib/api';
 import type { ModelItem } from '@/lib/types';
 
+type Provider = 'fireworks' | 'zai';
+
+const PROVIDERS: { value: Provider; label: string; placeholder: string }[] = [
+  { value: 'fireworks', label: 'Fireworks', placeholder: 'fw-...' },
+  { value: 'zai', label: 'z.ai', placeholder: 'zai-...' },
+];
+
 export function Onboarding({ onDone }: { onDone: () => void }) {
+  const [provider, setProvider] = useState<Provider>('fireworks');
   const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [models, setModels] = useState<ModelItem[]>([]);
   const [modelError, setModelError] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const currentPlaceholder =
+    PROVIDERS.find((p) => p.value === provider)?.placeholder ?? '';
 
   async function verifyKey() {
     if (!apiKey.trim()) return;
@@ -39,7 +50,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       await postOnboarding({
-        provider: 'fireworks',
+        provider,
         apiKey: apiKey.trim(),
         defaultModel: defaultModel.trim(),
       });
@@ -51,6 +62,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     }
   }
 
+  function handleProviderChange(next: Provider) {
+    setProvider(next);
+    setApiKey('');
+    setDefaultModel('');
+    setModels([]);
+    setModelError(false);
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 p-6">
       <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-8 shadow-sm">
@@ -58,7 +77,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           agent-os
         </h1>
         <p className="mb-6 text-sm text-zinc-400">
-          Enter your Fireworks API key to configure the supervisor.
+          Enter your API key to configure the supervisor.
         </p>
 
         <div className="space-y-4">
@@ -66,8 +85,21 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <label className="mb-1.5 block text-xs font-medium text-zinc-400">
               Provider
             </label>
-            <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm font-mono text-zinc-300">
-              fireworks
+            <div className="flex gap-2">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => handleProviderChange(p.value)}
+                  className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                    provider === p.value
+                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -79,7 +111,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="fw-..."
+              placeholder={currentPlaceholder}
               className="border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600"
             />
           </div>
