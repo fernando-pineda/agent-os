@@ -60,6 +60,7 @@ import { MarkdownText } from '@/components/assistant-ui/markdown-text';
 import {
   InboxAgentChip,
   MessageAgentChip,
+  RepliedToAgentChip,
 } from '@/components/assistant-ui/message-agent-tool';
 import {
   Reasoning,
@@ -536,6 +537,9 @@ const AssistantMessage: FC = () => {
                 }
                 if (part.name === 'inbox-agent') {
                   return <InboxAgentChip {...part} />;
+                }
+                if (part.name === 'replied-to-agent') {
+                  return <RepliedToAgentChip {...part} />;
                 }
                 return part.dataRendererUI;
               case 'file':

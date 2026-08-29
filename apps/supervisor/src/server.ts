@@ -405,6 +405,24 @@ async function handle(
         return;
       }
       statusTracker.refreshAgent(updated);
+      // If plugins changed and the agent is running, hot-reload its MCPs.
+      if (patch.plugins !== undefined) {
+        const port = getAgentPort(registry, id);
+        if (port) {
+          fetch(`http://localhost:${port}/plugins/reload`, { method: 'POST' })
+            .then(async (r) => {
+              if (!r.ok)
+                console.warn(`plugins/reload ${id} returned ${r.status}`);
+            })
+            .catch((err) =>
+              console.warn(
+                `plugins/reload ${id} failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              ),
+            );
+        }
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(updated));
       return;
@@ -485,6 +503,33 @@ async function handle(
       clearInterval(heartbeat);
       unsubscribe();
     });
+    return;
+  }
+
+  const matchAgentAbort = /^\/api\/agents\/([^/]+)\/abort$/.exec(pathname);
+  if (matchAgentAbort && req.method === 'POST') {
+    const id = decodeURIComponent(matchAgentAbort[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const response = await fetch(`http://localhost:${agentPort}/abort`, {
+        method: 'POST',
+      });
+      const body = await response.text();
+      res.writeHead(response.status, { 'Content-Type': 'application/json' });
+      res.end(body);
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
     return;
   }
 
@@ -583,6 +628,135 @@ async function handle(
     } catch {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ inputTokens: 0, outputTokens: 0 }));
+      return;
+    }
+  }
+
+  // Automations proxy: forwards to the agent's own server for CRUD + run.
+  const matchAutomations = /^\/api\/agents\/([^/]+)\/automations$/.exec(
+    pathname,
+  );
+  if (matchAutomations && (req.method === 'GET' || req.method === 'POST')) {
+    const id = decodeURIComponent(matchAutomations[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    const contentType = req.headers['content-type'] ?? 'application/json';
+    const body = await readBuffer(req);
+    const init: RequestInit = {
+      method: req.method,
+      headers: { 'Content-Type': contentType },
+    };
+    if (req.method === 'POST') init.body = body;
+    try {
+      const response = await fetch(
+        `http://localhost:${agentPort}/automations`,
+        init,
+      );
+      const respBody = await response.text();
+      res.writeHead(response.ok ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(respBody);
+      return;
+    } catch {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent is unreachable' }));
+      return;
+    }
+  }
+
+  const matchAutomationItem =
+    /^\/api\/agents\/([^/]+)\/automations\/([^/]+)$/.exec(pathname);
+  if (
+    matchAutomationItem &&
+    (req.method === 'GET' || req.method === 'PATCH' || req.method === 'DELETE')
+  ) {
+    const id = decodeURIComponent(matchAutomationItem[1]!);
+    const automationId = decodeURIComponent(matchAutomationItem[2]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    const contentType = req.headers['content-type'] ?? 'application/json';
+    const body = await readBuffer(req);
+    const init: RequestInit = {
+      method: req.method,
+      headers: { 'Content-Type': contentType },
+    };
+    if (req.method !== 'GET') init.body = body;
+    try {
+      const response = await fetch(
+        `http://localhost:${agentPort}/automations/${encodeURIComponent(automationId)}`,
+        init,
+      );
+      const respBody = await response.text();
+      res.writeHead(response.ok ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(respBody);
+      return;
+    } catch {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent is unreachable' }));
+      return;
+    }
+  }
+
+  const matchAutomationRun =
+    /^\/api\/agents\/([^/]+)\/automations\/([^/]+)\/run$/.exec(pathname);
+  if (matchAutomationRun && req.method === 'POST') {
+    const id = decodeURIComponent(matchAutomationRun[1]!);
+    const automationId = decodeURIComponent(matchAutomationRun[2]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const response = await fetch(
+        `http://localhost:${agentPort}/automations/${encodeURIComponent(automationId)}/run`,
+        { method: 'POST' },
+      );
+      const respBody = await response.text();
+      res.writeHead(response.ok ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(respBody);
+      return;
+    } catch {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent is unreachable' }));
+      return;
+    }
+  }
+
+  const matchAgentTools = /^\/api\/agents\/([^/]+)\/tools$/.exec(pathname);
+  if (matchAgentTools && req.method === 'GET') {
+    const id = decodeURIComponent(matchAgentTools[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const response = await fetch(`http://localhost:${agentPort}/tools`);
+      const respBody = await response.text();
+      res.writeHead(response.ok ? 200 : 503, {
+        'Content-Type': 'application/json',
+      });
+      res.end(respBody);
+      return;
+    } catch {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent is unreachable' }));
       return;
     }
   }

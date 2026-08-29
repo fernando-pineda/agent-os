@@ -1,7 +1,7 @@
 'use client';
 
 import type { DataMessagePartProps } from '@assistant-ui/react';
-import { ArrowRightIcon, MailIcon, UserIcon } from 'lucide-react';
+import { ArrowRightIcon, MailIcon, ReplyIcon, UserIcon } from 'lucide-react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import type { AgentInfo } from '@/lib/types';
@@ -84,6 +84,35 @@ export const InboxAgentChip = ({ data }: DataMessagePartProps<unknown>) => {
         <AgentAvatarTile agent={sender} />
         <MailIcon className="size-3.5" aria-hidden="true" />
         {label}
+      </span>
+    </div>
+  );
+};
+
+type RepliedToAgentData = {
+  toAgentId: string;
+};
+
+// Auto-reply to an inbound agent message (not via message_agent tool).
+export const RepliedToAgentChip = ({ data }: DataMessagePartProps<unknown>) => {
+  const d = data as RepliedToAgentData | undefined;
+  const targetId = d?.toAgentId || 'agent';
+  const agents = useAgentsFeed();
+  const { selectedAgentId } = useAgentSelection();
+  const sender = agents.find((a) => a.id === selectedAgentId);
+  const recipient = agents.find((a) => a.id === targetId);
+  const recipientName = recipient?.name ?? targetId;
+
+  return (
+    <div className="flex flex-col items-center gap-1 py-1">
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+        <AgentAvatarTile agent={sender} />
+        <ArrowRightIcon className="size-3.5" aria-hidden="true" />
+        <AgentAvatarTile agent={recipient} />
+      </span>
+      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <ReplyIcon className="size-3" aria-hidden="true" />
+        {`Replied to ${recipientName}`}
       </span>
     </div>
   );

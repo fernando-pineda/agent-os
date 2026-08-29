@@ -16,7 +16,9 @@
     "@agent-os/core": "workspace:*",
     "@agent-os/sandbox": "workspace:*",
     "@agent-os/tools": "workspace:*",
-    "assistant-stream": "0.3.40"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "assistant-stream": "0.3.40",
+    "croner": "^10.0.1"
   },
   "devDependencies": {
     "@types/node": "^22",

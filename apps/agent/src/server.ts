@@ -21,9 +21,15 @@ import {
   ToolResponse,
 } from 'assistant-stream';
 import type { ReadonlyJSONValue } from 'assistant-stream/utils';
+import { Cron } from 'croner';
+import type { Automation, AutomationScheduler } from './automations.js';
 import { loadMemoryIndex } from './compact.js';
-import { readGlobalReminders } from './config.js';
-import { appendOutbox, deliverWithRetry, removeOutbox } from './outbox.js';
+import {
+  readAgentConfigFresh,
+  readAgentReminders,
+  readGlobalReminders,
+} from './config.js';
+import { appendOutbox } from './outbox.js';
 import { findPortFor, myPort } from './registry.js';
 import {
   loadThread,
@@ -46,7 +52,13 @@ export interface ServerDeps {
   currentTaskId?: string;
   onStatusChange: (status: AgentStatus) => void;
   buildContext: (signal?: AbortSignal) => ToolContext;
-  sendAgentMessage: (toAgentId: string, message: string) => Promise<string>;
+  sendAgentMessage: (
+    toAgentId: string,
+    message: string,
+    opts?: { replyDepth?: number },
+  ) => Promise<string>;
+  scheduler?: AutomationScheduler;
+  onPluginsReload?: () => Promise<Tool[]>;
 }
 
 export interface AgentServer {
@@ -55,6 +67,7 @@ export interface AgentServer {
   setStatus: (status: AgentStatus) => void;
   setCurrentTaskId: (taskId: string | undefined) => void;
   isBusy: () => boolean;
+  setScheduler: (scheduler: AutomationScheduler) => void;
 }
 
 interface ToolCallContext {
@@ -83,6 +96,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   let currentTaskId = deps.currentTaskId;
   let running = false;
   let runningController: AbortController | undefined;
+  let scheduler: AutomationScheduler | undefined = deps.scheduler;
+  let tools = deps.tools;
   const server = createServer();
   let _listenPort: number | undefined;
 
@@ -163,6 +178,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           message?: string;
           replyTo?: string;
           inReplyTo?: string;
+          replyDepth?: number;
         };
         if (running) {
           res.writeHead(409, { 'content-type': 'application/json' });
@@ -174,15 +190,15 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         const taskId =
           typeof body.taskId === 'string' ? body.taskId : crypto.randomUUID();
         const message = typeof body.message === 'string' ? body.message : '';
-        const replyTo =
-          typeof body.replyTo === 'string' ? body.replyTo : fromAgentId;
+        const replyDepth =
+          typeof body.replyDepth === 'number' ? body.replyDepth : 0;
         const inboxBody: {
           fromAgentId: string;
           taskId: string;
           message: string;
-          replyTo: string;
           inReplyTo?: string;
-        } = { fromAgentId, taskId, message, replyTo };
+          replyDepth: number;
+        } = { fromAgentId, taskId, message, replyDepth };
         if (typeof body.inReplyTo === 'string') {
           inboxBody.inReplyTo = body.inReplyTo;
         }
@@ -194,6 +210,236 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         res.writeHead(202, { 'content-type': 'application/json' });
         res.end(JSON.stringify(result));
         return;
+      }
+
+      // GET /tools - list all available tools (built-in + MCP)
+      if (method === 'GET' && url === '/tools') {
+        const list = tools.map((t) => ({
+          name: t.spec.name,
+          description: t.spec.description,
+        }));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ tools: list }));
+        return;
+      }
+
+      // POST /abort - cancel the currently running turn
+      if (method === 'POST' && url === '/abort') {
+        if (!running || !runningController) {
+          res.writeHead(409, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No run in progress' }));
+          return;
+        }
+        runningController.abort();
+        res.writeHead(202, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // POST /plugins/reload - reconnect MCPs from current config without restart
+      if (method === 'POST' && url === '/plugins/reload') {
+        if (!deps.onPluginsReload) {
+          res.writeHead(501, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Plugin reload not supported' }));
+          return;
+        }
+        try {
+          const next = await deps.onPluginsReload();
+          tools = next;
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({ ok: true, tools: next.map((t) => t.spec.name) }),
+          );
+        } catch (err) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
+        return;
+      }
+
+      // GET /automations - list all automations
+      if (method === 'GET' && url === '/automations') {
+        const automations = scheduler ? await scheduler.list() : [];
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ automations }));
+        return;
+      }
+
+      // POST /automations - create/upsert an automation
+      if (method === 'POST' && url === '/automations') {
+        if (!scheduler) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Scheduler not available' }));
+          return;
+        }
+        const body = (await json(req)) as Partial<Automation>;
+        const id =
+          typeof body.id === 'string' && body.id.length > 0
+            ? body.id
+            : `auto-${crypto.randomUUID()}`;
+        const cron = typeof body.cron === 'string' ? body.cron : '';
+        const tool = typeof body.tool === 'string' ? body.tool : '';
+        const name = typeof body.name === 'string' ? body.name : '';
+        if (!cron) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'cron is required' }));
+          return;
+        }
+        const prompt =
+          typeof body.prompt === 'string' ? body.prompt.trim() : '';
+        if (!tool && !prompt) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: 'prompt is required when no tool is bound',
+            }),
+          );
+          return;
+        }
+        // validate cron expression
+        try {
+          const testJob = new Cron(cron, () => {});
+          testJob.stop();
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({ error: `Invalid cron expression: ${cron}` }),
+          );
+          return;
+        }
+        const automation: Automation = {
+          id,
+          name,
+          cron,
+          ...(tool ? { tool } : {}),
+          ...(body.args && typeof body.args === 'object'
+            ? { args: body.args as Record<string, unknown> }
+            : {}),
+          ...(prompt ? { prompt } : {}),
+          ...(typeof body.cursor === 'string' ? { cursor: body.cursor } : {}),
+          delivery: body.delivery === 'silent' ? 'silent' : 'inbox',
+          enabled: body.enabled !== false,
+          ...(typeof body.createdAt === 'string'
+            ? { createdAt: body.createdAt }
+            : { createdAt: new Date().toISOString() }),
+        };
+        const saved = await scheduler.upsert(automation);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(saved));
+        return;
+      }
+
+      // /automations/:id routes
+      const autoMatch = url.match(/^\/automations\/([^/]+)(?:\/run)?$/);
+      if (autoMatch?.[1]) {
+        const id = autoMatch[1];
+        const isRun = url.endsWith('/run');
+
+        if (method === 'GET' && !isRun) {
+          const automations = scheduler ? await scheduler.list() : [];
+          const automation = automations.find((a) => a.id === id);
+          if (!automation) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Automation not found' }));
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(automation));
+          return;
+        }
+
+        if (method === 'PATCH' && !isRun) {
+          if (!scheduler) {
+            res.writeHead(503, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Scheduler not available' }));
+            return;
+          }
+          const automations = await scheduler.list();
+          const existing = automations.find((a) => a.id === id);
+          if (!existing) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Automation not found' }));
+            return;
+          }
+          const body = (await json(req)) as Partial<Automation>;
+          const updated: Automation = {
+            ...existing,
+            ...(typeof body.name === 'string' ? { name: body.name } : {}),
+            ...(typeof body.cron === 'string' ? { cron: body.cron } : {}),
+            ...(typeof body.tool === 'string' ? { tool: body.tool } : {}),
+            ...(body.args && typeof body.args === 'object'
+              ? { args: body.args as Record<string, unknown> }
+              : {}),
+            ...(typeof body.prompt === 'string' ? { prompt: body.prompt } : {}),
+            ...(typeof body.cursor === 'string' ? { cursor: body.cursor } : {}),
+            ...(body.delivery === 'silent' || body.delivery === 'inbox'
+              ? { delivery: body.delivery }
+              : {}),
+            ...(typeof body.enabled === 'boolean'
+              ? { enabled: body.enabled }
+              : {}),
+          };
+          // validate cron expression if it changed
+          try {
+            const testJob = new Cron(updated.cron, () => {});
+            testJob.stop();
+          } catch {
+            res.writeHead(400, { 'content-type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                error: `Invalid cron expression: ${updated.cron}`,
+              }),
+            );
+            return;
+          }
+          const saved = await scheduler.upsert(updated);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(saved));
+          return;
+        }
+
+        if (method === 'DELETE' && !isRun) {
+          if (!scheduler) {
+            res.writeHead(503, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Scheduler not available' }));
+            return;
+          }
+          const removed = await scheduler.remove(id);
+          if (!removed) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Automation not found' }));
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        if (method === 'POST' && isRun) {
+          if (!scheduler) {
+            res.writeHead(503, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Scheduler not available' }));
+            return;
+          }
+          const result = await scheduler.runNow(id);
+          if (!result.ran) {
+            res.writeHead(404, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Automation not found' }));
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              ok: true,
+              ...(result.summary ? { summary: result.summary } : {}),
+            }),
+          );
+          return;
+        }
       }
 
       res.writeHead(404, { 'content-type': 'application/json' });
@@ -240,6 +486,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     setStatus,
     setCurrentTaskId,
     isBusy: () => running,
+    setScheduler: (s: AutomationScheduler) => {
+      scheduler = s;
+    },
   };
 
   async function handleChat(
@@ -264,23 +513,28 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         try {
           const memoryIndex = await loadMemoryIndex(serverDeps.homeDir);
           const globalReminders = await readGlobalReminders();
+          const agentReminders = await readAgentReminders(serverDeps.agentId);
+          const freshAgent = await readAgentConfigFresh(serverDeps.agentId);
+          const agentName = freshAgent?.name;
+          const agentRole = freshAgent?.role ?? serverDeps.agent.role;
+          const agentInstructions =
+            freshAgent?.instructions ?? serverDeps.agent.instructions;
           const reminders = [
             ...(globalReminders ?? []),
-            ...(serverDeps.agent.reminders ?? []),
+            ...(agentReminders ?? []),
           ];
           // Persist incrementally so a reload mid-run keeps the turn so far.
           const persistPartial = (): Promise<void> =>
             enqueuePersist(() => persistTurn(messages, segments, serverDeps));
           await runAgentLoop({
             llm: serverDeps.llm,
-            tools: serverDeps.tools,
+            tools,
             model: serverDeps.model,
             messages: chatMessages,
             agentId: serverDeps.agentId,
-            ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
-            ...(serverDeps.agent.instructions
-              ? { instructions: serverDeps.agent.instructions }
-              : {}),
+            ...(agentName ? { agentName } : {}),
+            ...(agentRole ? { role: agentRole } : {}),
+            ...(agentInstructions ? { instructions: agentInstructions } : {}),
             ...(memoryIndex ? { memoryIndex } : {}),
             ...(reminders.length > 0 ? { reminders } : {}),
             buildContext: serverDeps.buildContext,
@@ -346,8 +600,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       fromAgentId: string;
       taskId: string;
       message: string;
-      replyTo: string;
       inReplyTo?: string;
+      replyDepth: number;
     },
     serverDeps: ServerDeps,
     controls: RunControls,
@@ -358,17 +612,29 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     runningController = new AbortController();
 
     const prefix = body.inReplyTo ? 'Reply from agent' : 'Message from agent';
+    const depth = body.replyDepth;
+    const atCap = depth >= MAX_AGENT_REPLY_DEPTH;
+    const closingNote = atCap
+      ? `\n\n[system: this exchange has reached the reply limit (${MAX_AGENT_REPLY_DEPTH}). Do NOT reply with message_agent. Acknowledge briefly in plain text and stop.]`
+      : depth >= MAX_AGENT_REPLY_DEPTH - 1
+        ? `\n\n[system: this exchange is about to hit the reply limit. Wrap it up; reply only if truly necessary.]`
+        : '';
     const chatMessages: ChatMessage[] = [
       {
         role: 'user',
-        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}`,
+        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}${closingNote}`,
       },
     ];
 
     const controller = runningController;
 
     void processInbox(
-      body,
+      {
+        fromAgentId: body.fromAgentId,
+        replyDepth: depth,
+        atCap,
+        ...(body.inReplyTo ? { inReplyTo: body.inReplyTo } : {}),
+      },
       chatMessages,
       serverDeps,
       controls,
@@ -381,10 +647,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   async function processInbox(
     body: {
       fromAgentId: string;
-      taskId: string;
-      message: string;
-      replyTo: string;
       inReplyTo?: string;
+      replyDepth: number;
+      atCap: boolean;
     },
     chatMessages: ChatMessage[],
     serverDeps: ServerDeps,
@@ -393,38 +658,35 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   ): Promise<void> {
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
-    const replyParts: string[] = [];
-    let text = '';
 
     try {
       const globalReminders = await readGlobalReminders();
-      const reminders = [
-        ...(globalReminders ?? []),
-        ...(serverDeps.agent.reminders ?? []),
-      ];
+      const agentReminders = await readAgentReminders(serverDeps.agentId);
+      const freshAgent = await readAgentConfigFresh(serverDeps.agentId);
+      const agentName = freshAgent?.name;
+      const agentRole = freshAgent?.role ?? serverDeps.agent.role;
+      const agentInstructions =
+        freshAgent?.instructions ?? serverDeps.agent.instructions;
+      const reminders = [...(globalReminders ?? []), ...(agentReminders ?? [])];
       await runAgentLoop({
         llm: serverDeps.llm,
-        tools: serverDeps.tools,
+        tools,
         model: serverDeps.model,
         messages: chatMessages,
         agentId: serverDeps.agentId,
-        ...(serverDeps.agent.role ? { role: serverDeps.agent.role } : {}),
-        ...(serverDeps.agent.instructions
-          ? { instructions: serverDeps.agent.instructions }
-          : {}),
+        ...(agentName ? { agentName } : {}),
+        ...(agentRole ? { role: agentRole } : {}),
+        ...(agentInstructions ? { instructions: agentInstructions } : {}),
         ...(reminders.length > 0 ? { reminders } : {}),
         buildContext: serverDeps.buildContext,
         signal: controller.signal,
         onEvent: (event: LoopEvent) => {
-          if (event.type === 'text-delta') {
-            replyParts.push(event.delta);
-          }
           handleStreamEvent(event, undefined, toolContexts, segments);
         },
       });
-      text = replyParts.join('');
       // Persist the inbound message so the UI can surface it and the model
-      // sees it in context after restarts.
+      // sees it in context after restarts. Replies go out via message_agent,
+      // not an auto-forward, so no replyToAgentId is set here.
       const inbound: UIMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -443,49 +705,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       await persistTurn([inbound], segments, serverDeps);
     } catch (err) {
       console.error('Inbox loop error', err);
-      text = err instanceof Error ? err.message : String(err);
     } finally {
       controls.setStatus('online');
       controls.setCurrentTaskId(undefined);
       controls.markRunning(false);
     }
-
-    if (
-      !text ||
-      !body.replyTo ||
-      body.replyTo === 'unknown' ||
-      body.inReplyTo
-    ) {
-      return;
-    }
-
-    const outboxEntry = {
-      toAgentId: body.replyTo,
-      message: text,
-      inReplyTo: body.taskId,
-      ts: Date.now(),
-    };
-    await appendOutbox(serverDeps.homeDir, outboxEntry);
-
-    void deliverWithRetry(
-      serverDeps.agentId,
-      outboxEntry.toAgentId,
-      outboxEntry.message,
-      outboxEntry.inReplyTo,
-    )
-      .then(async (ok) => {
-        if (ok) {
-          await removeOutbox(serverDeps.homeDir, outboxEntry);
-          return;
-        }
-        console.error(
-          'Inbox reply callback failed after all retries',
-          outboxEntry,
-        );
-      })
-      .catch((err) => {
-        console.error('Inbox reply callback failed', err);
-      });
   }
 }
 
@@ -560,6 +784,7 @@ async function persistTurn(
   existingMessages: UIMessage[],
   segments: TurnSegment[],
   deps: ServerDeps,
+  extraAssistantMetadata?: { replyToAgentId?: string },
 ): Promise<void> {
   // Persist the full thread as sent by the client (it already includes the
   // new user message) merged with anything stored that the client missed.
@@ -570,7 +795,39 @@ async function persistTurn(
   const incoming = existingMessages
     .filter((m) => !m.id || !storedIds.has(m.id))
     .map((m) => (m.id ? m : { ...m, id: crypto.randomUUID() }));
-  const messages = [...stored, ...incoming];
+
+  // Stable per-turn id derived from the triggering user message, so
+  // incremental and final persists of one turn share the same marker.
+  // Re-persisting an in-progress turn must replace, not append, its prior
+  // partial assistant messages; otherwise each persist duplicates the turn.
+  const lastUser = [...existingMessages]
+    .reverse()
+    .find((m) => m.role === 'user');
+  const turnId = lastUser?.id ? `turn-${lastUser.id}` : undefined;
+
+  // Metadata applied to every assistant message built from segments.
+  const assistantMetadata: Record<string, unknown> | undefined = (() => {
+    const replyToAgentId =
+      typeof extraAssistantMetadata?.replyToAgentId === 'string' &&
+      extraAssistantMetadata.replyToAgentId !== 'unknown' &&
+      extraAssistantMetadata.replyToAgentId.length > 0
+        ? extraAssistantMetadata.replyToAgentId
+        : undefined;
+    if (!turnId && !replyToAgentId) return undefined;
+    return {
+      ...(turnId ? { turnId } : {}),
+      ...(replyToAgentId ? { replyToAgentId } : {}),
+    };
+  })();
+
+  // Drop stored assistant messages from a prior partial persist of this
+  // same turn before appending the freshly rebuilt ones.
+  const messages = turnId
+    ? [
+        ...stored.filter((m) => m.metadata?.turnId !== turnId),
+        ...incoming.filter((m) => m.metadata?.turnId !== turnId),
+      ]
+    : [...stored, ...incoming];
 
   // Group segments into messages: a tool call starts a new message;
   // following text joins that message. Leading text is its own message.
@@ -584,7 +841,12 @@ async function persistTurn(
   for (const seg of segments) {
     if (seg.kind === 'text' && seg.text) {
       if (!current) {
-        current = { id: crypto.randomUUID(), role: 'assistant', content: '' };
+        current = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '',
+          ...(assistantMetadata ? { metadata: assistantMetadata } : {}),
+        };
       }
       current.content = (current.content ?? '') + seg.text;
       const parts = current.parts ?? [];
@@ -598,7 +860,11 @@ async function persistTurn(
     } else if (seg.kind === 'tool' && seg.toolCallId) {
       // Tool call joins the current message; following text continues it.
       if (!current) {
-        current = { id: crypto.randomUUID(), role: 'assistant' };
+        current = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          ...(assistantMetadata ? { metadata: assistantMetadata } : {}),
+        };
       }
       const parts = current.parts ?? [];
       parts.push({
@@ -619,7 +885,10 @@ async function persistTurn(
 export async function sendAgentMessageHttp(
   toAgentId: string,
   message: string,
+  homeDir?: string,
+  replyDepth = 0,
 ): Promise<string> {
+  const fromAgentId = process.env.AGENT_ID ?? 'unknown';
   const port = await findPortFor(toAgentId);
   if (!port) {
     return `Agent ${toAgentId} is unreachable (not running?).`;
@@ -630,14 +899,27 @@ export async function sendAgentMessageHttp(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        fromAgentId: process.env.AGENT_ID ?? 'unknown',
+        fromAgentId,
         taskId: crypto.randomUUID(),
         message,
-        replyTo: process.env.AGENT_ID ?? 'unknown',
+        replyTo: fromAgentId,
+        // Depth tags the reply chain so the receiver can stop at the cap.
+        inReplyTo: fromAgentId,
+        replyDepth,
       }),
     });
 
     if (res.status === 409) {
+      // Queue for later delivery instead of failing.
+      if (homeDir) {
+        await appendOutbox(homeDir, {
+          toAgentId,
+          message,
+          inReplyTo: fromAgentId,
+          ts: Date.now(),
+        });
+        return `Agent ${toAgentId} is busy; your message was queued and will be delivered when they are free.`;
+      }
       return `Agent ${toAgentId} is busy with another task; your message was not delivered. Try again later.`;
     }
     if (!res.ok) {

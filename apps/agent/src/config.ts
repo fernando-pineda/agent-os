@@ -54,6 +54,46 @@ export async function loadAgentConfig(
   return { config, agent, model, workspace, homeDir };
 }
 
+// Re-reads the agent config each call so edits (reminders, model, etc.) made
+// while the agent runs take effect on the next turn without a restart.
+export async function readAgentReminders(
+  agentId: string,
+): Promise<string[] | undefined> {
+  try {
+    const registryPath = join(
+      homedir(),
+      '.agent-os',
+      'agents',
+      agentId,
+      'config.json',
+    );
+    const raw = await readFile(registryPath, 'utf-8');
+    const parsed = JSON.parse(raw) as AgentConfig;
+    return parsed.reminders;
+  } catch {
+    return undefined;
+  }
+}
+
+// Same fresh-read rationale as readAgentReminders: config edits apply next turn.
+export async function readAgentConfigFresh(
+  agentId: string,
+): Promise<AgentConfig | undefined> {
+  try {
+    const registryPath = join(
+      homedir(),
+      '.agent-os',
+      'agents',
+      agentId,
+      'config.json',
+    );
+    const raw = await readFile(registryPath, 'utf-8');
+    return JSON.parse(raw) as AgentConfig;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function readGlobalReminders(): Promise<string[] | undefined> {
   try {
     const globalPath = join(homedir(), '.agent-os', 'config.json');

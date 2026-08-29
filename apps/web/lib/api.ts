@@ -2,7 +2,12 @@ import type { UIMessage } from '@ai-sdk/react';
 import type {
   AgentInfo,
   AgentsResponse,
+  AgentTool,
+  AgentToolsResponse,
+  Automation,
+  AutomationsResponse,
   CreateAgentPayload,
+  CreateAutomationPayload,
   GlobalConfigStatus,
   McpServerConfig,
   McpServersResponse,
@@ -11,7 +16,9 @@ import type {
   ModelsResponse,
   OnboardingPayload,
   OnboardingStatus,
+  RunAutomationResponse,
   UpdateAgentPayload,
+  UpdateAutomationPayload,
   UpdateConfigPayload,
 } from '@/lib/types';
 
@@ -221,4 +228,67 @@ export function subscribeAgentEvents(
   });
 
   return () => source.close();
+}
+
+export async function getAutomations(agentId: string): Promise<Automation[]> {
+  const res = await fetchJson<AutomationsResponse>(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations`,
+  );
+  return res.automations;
+}
+
+export async function createAutomation(
+  agentId: string,
+  payload: CreateAutomationPayload,
+): Promise<Automation> {
+  return fetchJson<Automation>(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function updateAutomation(
+  agentId: string,
+  automationId: string,
+  payload: UpdateAutomationPayload,
+): Promise<Automation> {
+  return fetchJson<Automation>(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations/${encodeURIComponent(automationId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteAutomation(
+  agentId: string,
+  automationId: string,
+): Promise<void> {
+  await fetchJson(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations/${encodeURIComponent(automationId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function runAutomation(
+  agentId: string,
+  automationId: string,
+): Promise<RunAutomationResponse> {
+  return fetchJson<RunAutomationResponse>(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/automations/${encodeURIComponent(automationId)}/run`,
+    { method: 'POST' },
+  );
+}
+
+export async function getAgentTools(agentId: string): Promise<AgentTool[]> {
+  const res = await fetchJson<AgentToolsResponse>(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/tools`,
+  );
+  return res.tools;
 }

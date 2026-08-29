@@ -1,18 +1,21 @@
 'use client';
 
 import {
+  CheckIcon,
+  Loader2Icon,
   PencilIcon,
   PlayIcon,
   SettingsIcon,
   SquareIcon,
   Trash2Icon,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useAgentSelection,
   useAgentsFeed,
   useGroupsFeed,
 } from '@/components/agent-context';
+import { AutomationsPanel } from '@/components/automations-panel';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { RemindersEditor } from '@/components/reminders-editor';
 import { SettingsDialog } from '@/components/settings-dialog';
@@ -110,6 +113,7 @@ function AgentForm({
   character,
   color,
   instructions,
+  agentId,
   onName,
   onRole,
   onModel,
@@ -124,11 +128,7 @@ function AgentForm({
   onTogglePlugin,
   reminders,
   onReminders,
-  submitLabel,
-  onSubmit,
-  submitting,
-  submitDisabled,
-  error,
+  footer,
 }: {
   name: string;
   role: string;
@@ -136,6 +136,7 @@ function AgentForm({
   character: string;
   color: string;
   instructions: string;
+  agentId?: string;
   onName: (v: string) => void;
   onRole: (v: string) => void;
   onModel: (v: string) => void;
@@ -150,14 +151,10 @@ function AgentForm({
   onTogglePlugin: (name: string, checked: boolean) => void;
   reminders: string[];
   onReminders: (next: string[]) => void;
-  submitLabel: string;
-  onSubmit: () => void;
-  submitting: boolean;
-  submitDisabled: boolean;
-  error?: string;
+  footer?: React.ReactNode;
 }) {
   return (
-    <Tabs defaultValue="general">
+    <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col">
       <TabsList>
         <TabsTab value="general">General</TabsTab>
         <TabsTab value="instructions">Instructions & roles</TabsTab>
@@ -167,7 +164,7 @@ function AgentForm({
         <TabsIndicator />
       </TabsList>
       <TabsPanel value="general">
-        <div className="space-y-3 overflow-y-auto py-2 pr-1">
+        <div className="space-y-3 overflow-y-auto p-0.5">
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Name</label>
             <Input
@@ -194,7 +191,7 @@ function AgentForm({
         </div>
       </TabsPanel>
       <TabsPanel value="instructions">
-        <div className="space-y-3 overflow-y-auto py-2 pr-1">
+        <div className="space-y-3 overflow-y-auto p-0.5">
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Role</label>
             <Input
@@ -219,9 +216,13 @@ function AgentForm({
         </div>
       </TabsPanel>
       <TabsPanel value="automations">
-        <div className="py-6 text-center text-xs text-zinc-500">
-          Automations are not available yet.
-        </div>
+        {agentId ? (
+          <AutomationsPanel agentId={agentId} />
+        ) : (
+          <div className="py-6 text-center text-xs text-zinc-500">
+            Save the agent first to configure automations.
+          </div>
+        )}
       </TabsPanel>
       <TabsPanel value="plugins">
         {mcpLoading ? (
@@ -233,7 +234,7 @@ function AgentForm({
             No plugins configured. Add them in Settings.
           </div>
         ) : (
-          <div className="max-h-[40vh] space-y-1 overflow-y-auto py-2 pr-1">
+          <div className="max-h-[55vh] space-y-1 overflow-y-auto py-2 pr-1">
             {mcpServers.map((server) => (
               <label
                 key={server.name}
@@ -274,16 +275,7 @@ function AgentForm({
           />
         </div>
       </TabsPanel>
-      {error && (
-        <div className="px-1 pb-2 text-xs text-destructive">{error}</div>
-      )}
-      <Button
-        onClick={onSubmit}
-        disabled={submitDisabled || submitting}
-        className="mt-2 w-full"
-      >
-        {submitting ? 'Saving...' : submitLabel}
-      </Button>
+      {footer && <div className="mt-auto pt-2">{footer}</div>}
     </Tabs>
   );
 }
@@ -303,13 +295,13 @@ function AvatarPicker({
     <>
       <div>
         <label className="mb-1.5 block text-xs text-zinc-400">Character</label>
-        <div className="grid grid-cols-5 gap-2">
+        <div className="flex flex-wrap gap-2 p-0.5">
           {AGENT_CHARACTERS.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => onCharacter(c)}
-              className={`rounded-xl p-1.5 transition-all ${
+              className={`size-14 rounded-xl p-1.5 transition-all ${
                 character === c ? 'ring-2 ring-zinc-400' : 'hover:bg-white/5'
               }`}
               style={{ background: avatarTileBackground(color) }}
@@ -326,7 +318,7 @@ function AvatarPicker({
       </div>
       <div>
         <label className="mb-1.5 block text-xs text-zinc-400">Color</label>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5 p-0.5">
           {AGENT_AVATAR_COLORS.map((c) => (
             <button
               key={c}
@@ -728,7 +720,7 @@ export function AgentsPanel() {
     setSelectedAgentId,
   ]);
 
-  // --- Edit dialog state ---
+  // --- Edit dialog state (autosave with debounce) ---
   const [editDialog, setEditDialog] = useState<AgentInfo | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -739,35 +731,16 @@ export function AgentsPanel() {
     AGENT_CHARACTERS[0],
   );
   const [editColor, setEditColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
-  const [saving, setSaving] = useState(false);
-  const [editError, setEditError] = useState('');
+  const [saveStatus, setSaveStatus] = useState<
+    'idle' | 'pending' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipAutosaveRef = useRef(true);
 
-  const openEditDialog = useCallback(
-    (agent: AgentInfo) => {
-      setEditDialog(agent);
-      setEditName(agent.name);
-      setEditRole(agent.role ?? '');
-      setEditInstructions(agent.instructions ?? '');
-      setEditReminders(agent.reminders ?? []);
-      setEditModel(agent.model);
-      setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
-      setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
-      setSelectedPlugins(agent.plugins ?? []);
-      setEditError('');
-      void refreshMcpServers();
-    },
-    [refreshMcpServers],
-  );
-
-  const closeEditDialog = useCallback(() => {
-    setEditDialog(null);
-    setEditError('');
-  }, []);
-
-  const confirmEdit = useCallback(async () => {
+  const persistEdit = useCallback(async () => {
     if (!editDialog) return;
-    setSaving(true);
-    setEditError('');
+    setSaveStatus('saving');
     try {
       await updateAgent(editDialog.id, {
         name: editName.trim() || undefined,
@@ -778,17 +751,41 @@ export function AgentsPanel() {
         plugins: selectedPlugins,
         reminders: editReminders,
       });
-      closeEditDialog();
-      setSelectedPlugins([]);
+      setSaveStatus('saved');
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaveStatus('idle'), 1500);
     } catch (err) {
-      setEditError(
-        err instanceof Error ? err.message : 'Failed to update agent',
-      );
-    } finally {
-      setSaving(false);
+      console.error(err);
+      setSaveStatus('error');
     }
   }, [
     editDialog,
+    editName,
+    editRole,
+    editModel,
+    editInstructions,
+    editCharacter,
+    editColor,
+    selectedPlugins,
+    editReminders,
+  ]);
+
+  // Autosave: any field change re-arms the debounce. The field deps are the
+  // trigger, persistEdit reads their latest values when it fires.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: field values are the debounce trigger
+  useEffect(() => {
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false;
+      return;
+    }
+    if (!editDialog) return;
+    setSaveStatus('pending');
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => void persistEdit(), 700);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [
     editName,
     editRole,
     editInstructions,
@@ -797,8 +794,42 @@ export function AgentsPanel() {
     editColor,
     selectedPlugins,
     editReminders,
-    closeEditDialog,
+    editDialog,
+    persistEdit,
   ]);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    },
+    [],
+  );
+
+  const openEditDialog = useCallback(
+    (agent: AgentInfo) => {
+      skipAutosaveRef.current = true;
+      setEditDialog(agent);
+      setEditName(agent.name);
+      setEditRole(agent.role ?? '');
+      setEditInstructions(agent.instructions ?? '');
+      setEditReminders(agent.reminders ?? []);
+      setEditModel(agent.model);
+      setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
+      setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
+      setSelectedPlugins(agent.plugins ?? []);
+      setSaveStatus('idle');
+      void refreshMcpServers();
+    },
+    [refreshMcpServers],
+  );
+
+  const closeEditDialog = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    setEditDialog(null);
+    setSaveStatus('idle');
+  }, []);
 
   return (
     <div className="flex h-full flex-col border-t border-zinc-800 bg-zinc-900">
@@ -824,7 +855,7 @@ export function AgentsPanel() {
           </MenuContent>
         </Menu>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
+          <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:h-[620px] sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>New agent</DialogTitle>
             </DialogHeader>
@@ -849,10 +880,15 @@ export function AgentsPanel() {
               onTogglePlugin={onTogglePlugin}
               reminders={reminders}
               onReminders={setReminders}
-              submitLabel="Create agent"
-              onSubmit={onCreate}
-              submitting={creating}
-              submitDisabled={!name.trim()}
+              footer={
+                <Button
+                  onClick={onCreate}
+                  disabled={!name.trim() || creating}
+                  className="w-full"
+                >
+                  {creating ? 'Saving...' : 'Create agent'}
+                </Button>
+              }
             />
           </DialogContent>
         </Dialog>
@@ -979,11 +1015,27 @@ export function AgentsPanel() {
 
       {/* Edit dialog */}
       <Dialog open={editDialog !== null} onOpenChange={closeEditDialog}>
-        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:h-[620px] sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit {editDialog?.name}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              Edit {editDialog?.name}
+              {saveStatus === 'pending' && (
+                <Loader2Icon className="size-3.5 animate-spin text-zinc-500" />
+              )}
+              {saveStatus === 'saving' && (
+                <Loader2Icon className="size-3.5 animate-spin text-zinc-300" />
+              )}
+              {saveStatus === 'saved' && (
+                <CheckIcon className="size-3.5 text-emerald-400" />
+              )}
+              {saveStatus === 'error' && (
+                <span className="text-xs font-normal text-destructive">
+                  Failed to save
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription className="text-zinc-400">
-              Update the agent's configuration. Changes apply immediately.
+              Changes save automatically.
             </DialogDescription>
           </DialogHeader>
           <AgentForm
@@ -993,6 +1045,7 @@ export function AgentsPanel() {
             character={editCharacter}
             color={editColor}
             instructions={editInstructions}
+            agentId={editDialog?.id}
             onName={setEditName}
             onRole={setEditRole}
             onModel={setEditModel}
@@ -1007,11 +1060,6 @@ export function AgentsPanel() {
             onTogglePlugin={onTogglePlugin}
             reminders={editReminders}
             onReminders={setEditReminders}
-            submitLabel="Save changes"
-            onSubmit={confirmEdit}
-            submitting={saving}
-            submitDisabled={false}
-            error={editError}
           />
         </DialogContent>
       </Dialog>

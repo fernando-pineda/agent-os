@@ -110,3 +110,50 @@ export type McpStatus = 'online' | 'offline' | 'unknown';
 export interface McpStatusResponse {
   statuses: Record<string, McpStatus>;
 }
+
+export type AutomationDelivery = 'inbox' | 'silent';
+
+export interface Automation {
+  id: string;
+  name: string;
+  cron: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  prompt?: string;
+  cursor?: string;
+  delivery: AutomationDelivery;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastSummary?: string;
+  createdAt: string;
+}
+
+export interface CreateAutomationPayload {
+  name: string;
+  cron: string;
+  prompt?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  delivery?: AutomationDelivery;
+  enabled?: boolean;
+}
+
+export type UpdateAutomationPayload = Partial<CreateAutomationPayload>;
+
+export interface AgentTool {
+  name: string;
+  description: string;
+}
+
+export interface AutomationsResponse {
+  automations: Automation[];
+}
+
+export interface AgentToolsResponse {
+  tools: AgentTool[];
+}
+
+export interface RunAutomationResponse {
+  ok: boolean;
+  summary?: string;
+}

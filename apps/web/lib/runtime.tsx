@@ -43,18 +43,24 @@ type Msg = {
   messageAgent?: { toAgentId: string; state: 'sending' | 'sent' | 'failed' };
   // Inbound agent messages (received via /inbox) render as their own chip.
   inboxAgent?: { fromAgentId: string; reply: boolean };
+  // Auto-reply to an inbound agent message renders as a standalone chip.
+  repliedToAgent?: { toAgentId: string };
 };
 
 function toThreadMessageLike(m: Msg): ThreadMessageLike {
-  if (m.messageAgent || m.inboxAgent) {
+  if (m.messageAgent || m.inboxAgent || m.repliedToAgent) {
     return {
       id: m.id,
       role: 'assistant',
       content: [
         {
           type: 'data',
-          name: m.messageAgent ? 'message-agent' : 'inbox-agent',
-          data: m.messageAgent ?? m.inboxAgent,
+          name: m.messageAgent
+            ? 'message-agent'
+            : m.inboxAgent
+              ? 'inbox-agent'
+              : 'replied-to-agent',
+          data: m.messageAgent ?? m.inboxAgent ?? m.repliedToAgent,
         } as never,
       ],
       status: { type: 'complete', reason: 'stop' } as const,
@@ -149,6 +155,50 @@ function extractToolParts(parts: unknown): ToolPart[] {
   return out;
 }
 
+// Walk interleaved parts in order and emit one Msg per text run and per
+// non-message_agent tool call, so reload matches the live render instead of
+// grouping all text above all tool chips.
+function buildOrderedMsgs(
+  id: string,
+  role: Msg['role'],
+  parts: unknown,
+): Msg[] {
+  const out: Msg[] = [];
+  if (!Array.isArray(parts)) return out;
+  let text = '';
+  let prevWasTool = false;
+  const flushText = (): void => {
+    if (text) {
+      out.push({ id: `${id}-t${out.length}`, role, text });
+      text = '';
+    }
+  };
+  for (const p of parts) {
+    const isTool =
+      p &&
+      typeof p === 'object' &&
+      (p as { type?: string }).type === 'tool-call';
+    if (isTool) {
+      const tp = extractToolParts([p]);
+      if (tp.length === 0) continue; // message_agent renders as a chip
+      flushText();
+      out.push({ id: `${id}-tc${out.length}`, role, text: '', toolParts: tp });
+      prevWasTool = true;
+      continue;
+    }
+    const t =
+      p && typeof p === 'object' && 'text' in p
+        ? String((p as { text?: unknown }).text ?? '')
+        : '';
+    if (t) {
+      text += prevWasTool ? `\n\n${t}` : t;
+      prevWasTool = false;
+    }
+  }
+  flushText();
+  return out;
+}
+
 // Rebuild chip messages from persisted message_agent tool-call parts.
 function extractMessageAgentChips(
   parts: unknown,
@@ -195,9 +245,23 @@ function extractInboxChip(m: {
   return { fromAgentId: match[1], reply: Boolean(match[2]) };
 }
 
+// Assistant messages that auto-replied to an inbound agent message carry
+// metadata.replyToAgentId; surface it as a standalone chip before the text.
+function extractRepliedToChip(m: {
+  role: string;
+  metadata?: unknown;
+}): NonNullable<Msg['repliedToAgent']> | undefined {
+  if (m.role !== 'assistant') return undefined;
+  const meta = m.metadata as { replyToAgentId?: unknown } | undefined;
+  const id = meta?.replyToAgentId;
+  if (typeof id !== 'string' || !id) return undefined;
+  return { toAgentId: id };
+}
+
 export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { setLivePreview, clearLivePreview } = useLivePreview();
   const { setUsage } = useAgentUsage();
@@ -241,11 +305,24 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 messageAgent: chip,
               });
             });
-            const text =
-              extractText(m.parts) || (m as { content?: string }).content || '';
-            const toolParts = extractToolParts(m.parts);
-            if (text || toolParts.length > 0 || chips.length === 0) {
-              out.push({ id, role: m.role, text, toolParts });
+            const repliedToChip = extractRepliedToChip(m);
+            if (repliedToChip) {
+              out.push({
+                id: `${id}-replied`,
+                role: 'assistant',
+                text: '',
+                repliedToAgent: repliedToChip,
+              });
+            }
+            const ordered = buildOrderedMsgs(id, m.role, m.parts);
+            if (ordered.length > 0) {
+              out.push(...ordered);
+            } else if (chips.length === 0) {
+              const text =
+                extractText(m.parts) ||
+                (m as { content?: string }).content ||
+                '';
+              out.push({ id, role: m.role, text, toolParts: [] });
             }
             return out;
           }),
@@ -304,9 +381,6 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
               inboxAgent: inboxChip,
             });
           } else {
-            const text =
-              extractText(m.parts) || (m as { content?: string }).content || '';
-            const toolParts = extractToolParts(m.parts);
             const chips = extractMessageAgentChips(m.parts);
             chips.forEach((chip, j) => {
               additions.push({
@@ -316,8 +390,24 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 messageAgent: chip,
               });
             });
-            if (text || toolParts.length > 0 || chips.length === 0) {
-              additions.push({ id, role: m.role, text, toolParts });
+            const repliedToChip = extractRepliedToChip(m);
+            if (repliedToChip) {
+              additions.push({
+                id: `${id}-replied`,
+                role: 'assistant',
+                text: '',
+                repliedToAgent: repliedToChip,
+              });
+            }
+            const ordered = buildOrderedMsgs(id, m.role, m.parts);
+            if (ordered.length > 0) {
+              additions.push(...ordered);
+            } else if (chips.length === 0) {
+              const text =
+                extractText(m.parts) ||
+                (m as { content?: string }).content ||
+                '';
+              additions.push({ id, role: m.role, text, toolParts: [] });
             }
           }
         });
@@ -393,11 +483,14 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       };
 
       try {
+        const controller = new AbortController();
+        abortRef.current = controller;
         const res = await fetch(
           `http://localhost:8787/api/agents/${agentId}/chat`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
               messages: nextMessages.map((m) => ({
                 id: m.id,
@@ -537,17 +630,24 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
           }
         }
       } catch (err) {
-        if ((current.toolParts?.length ?? 0) > 0) {
-          startNew();
-        }
-        if (!current.text) {
-          current.text = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        if (err instanceof Error && err.name === 'AbortError') {
+          if (!current.text) current.text = 'Stopped.';
+          pushCurrent();
+          clearLivePreview(agentId);
         } else {
-          current.text += `\n\nError: ${err instanceof Error ? err.message : String(err)}`;
+          if ((current.toolParts?.length ?? 0) > 0) {
+            startNew();
+          }
+          if (!current.text) {
+            current.text = `Error: ${err instanceof Error ? err.message : String(err)}`;
+          } else {
+            current.text += `\n\nError: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          pushCurrent();
+          clearLivePreview(agentId);
         }
-        pushCurrent();
-        clearLivePreview(agentId);
       } finally {
+        abortRef.current = null;
         setIsRunning(false);
         clearLivePreview(agentId);
       }
@@ -555,11 +655,23 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     [agentId, messages, setLivePreview, clearLivePreview, setUsage],
   );
 
+  const onCancel = useCallback(async () => {
+    abortRef.current?.abort();
+    try {
+      await fetch(`http://localhost:8787/api/agents/${agentId}/abort`, {
+        method: 'POST',
+      });
+    } catch (err) {
+      console.error('abort failed', err);
+    }
+  }, [agentId]);
+
   const runtime = useExternalStoreRuntime({
     messages,
     convertMessage: (m: Msg): ThreadMessageLike => toThreadMessageLike(m),
     isRunning,
     onNew,
+    onCancel,
   });
 
   if (!loaded) {

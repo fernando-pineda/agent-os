@@ -128,7 +128,11 @@ export interface ToolContext {
   group?: string | undefined;
   signal?: AbortSignal | undefined;
   env?: Record<string, string> | undefined;
-  sendAgentMessage?: (toAgentId: string, message: string) => Promise<string>;
+  sendAgentMessage?: (
+    toAgentId: string,
+    message: string,
+    opts?: { replyDepth?: number },
+  ) => Promise<string>;
 }
 
 export interface Tool {
@@ -141,4 +145,25 @@ export interface AgentMessageEnvelope {
   taskId: string;
   message: string;
   ts: string;
+}
+
+export type AutomationDelivery = 'inbox' | 'silent';
+
+export interface Automation {
+  id: string;
+  name: string;
+  cron: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  prompt?: string;
+  cursor?: string;
+  delivery: AutomationDelivery;
+  enabled: boolean;
+  lastRunAt?: string;
+  lastSummary?: string;
+  createdAt: string;
+}
+
+export interface AutomationStore {
+  automations: Automation[];
 }

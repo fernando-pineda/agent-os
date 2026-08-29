@@ -11,8 +11,14 @@ import type {
 import { FireworksLLMClient, MockLLMClient } from '@agent-os/core';
 import { wrapWithSandbox } from '@agent-os/sandbox';
 import { defaultTools, TmuxSession } from '@agent-os/tools';
+import { createAutomationScheduler } from './automations.js';
 import { scheduleCompaction } from './compact.js';
 import { loadAgentConfig } from './config.js';
+import {
+  closeMcpConnections,
+  connectMcpServers,
+  type McpConnection,
+} from './mcp.js';
 import { drainOutbox } from './outbox.js';
 import { createAgentServer, sendAgentMessageHttp } from './server.js';
 
@@ -25,6 +31,8 @@ const agentId = rawAgentId;
 
 let loadedConfig: Awaited<ReturnType<typeof loadAgentConfig>> | undefined;
 let _currentStatus: AgentStatus = 'starting';
+let mcpConnections: McpConnection[] = [];
+let serverRef: ReturnType<typeof createAgentServer>;
 
 async function main(): Promise<void> {
   loadedConfig = await loadAgentConfig(agentId);
@@ -59,7 +67,25 @@ async function main(): Promise<void> {
     );
   }
 
-  const tools = buildTools(agent.sandboxed ?? false, homeDir, workspace, agent);
+  const tools = buildTools(agent.sandboxed ?? false, homeDir, workspace);
+
+  const activeMcp = (config.mcpServers ?? []).filter((s) =>
+    agent.plugins?.includes(s.name),
+  );
+  const mcpConns = await connectMcpServers(activeMcp, agent.plugins ?? []);
+  mcpConnections = mcpConns;
+  const mcpTools = mcpConns.flatMap((c) => c.tools);
+  const allTools = [...tools, ...mcpTools];
+
+  const scheduler = createAutomationScheduler({
+    homeDir,
+    agentId,
+    mcpConnections: mcpConns,
+    isBusy: () => serverRef.isBusy(),
+    buildContext: (signal) =>
+      buildContext(agentId, workspace, homeDir, signal, agent),
+  });
+
   const server = createAgentServer({
     agentId,
     workspace,
@@ -67,18 +93,35 @@ async function main(): Promise<void> {
     agent,
     model,
     llm,
-    tools,
+    tools: allTools,
     status: 'starting',
     onStatusChange: (status) => {
       _currentStatus = status;
     },
     buildContext: (signal) =>
       buildContext(agentId, workspace, homeDir, signal, agent),
-    sendAgentMessage: sendAgentMessageHttp,
+    sendAgentMessage: (to, msg, opts) =>
+      sendAgentMessageHttp(to, msg, homeDir, opts?.replyDepth ?? 0),
+    onPluginsReload: async () => {
+      const fresh = await loadAgentConfig(agentId);
+      const plugins = fresh.agent.plugins ?? [];
+      const active = (config.mcpServers ?? []).filter((s) =>
+        plugins.includes(s.name),
+      );
+      await closeMcpConnections(mcpConnections);
+      const conns = await connectMcpServers(active, plugins);
+      mcpConnections = conns;
+      scheduler.setMcpConnections(conns);
+      return [...tools, ...conns.flatMap((c) => c.tools)];
+    },
   });
+  serverRef = server;
 
   server.setStatus('online');
   _currentStatus = 'online';
+
+  await scheduler.start();
+  server.setScheduler(scheduler);
 
   const stopCompaction = scheduleCompaction({
     homeDir,
@@ -94,14 +137,19 @@ async function main(): Promise<void> {
   void drainOutbox(homeDir, agentId).catch((err) => {
     console.error('Failed to drain outbox on startup', err);
   });
+  const outboxTimer = setInterval(() => {
+    void drainOutbox(homeDir, agentId).catch(() => undefined);
+  }, 15000);
 
   process.on('SIGTERM', () => {
     stopCompaction();
-    void shutdown(server);
+    clearInterval(outboxTimer);
+    void shutdown(server, scheduler);
   });
   process.on('SIGINT', () => {
     stopCompaction();
-    void shutdown(server);
+    clearInterval(outboxTimer);
+    void shutdown(server, scheduler);
   });
 
   process.on('uncaughtException', (err: Error) => {
@@ -122,9 +170,12 @@ async function main(): Promise<void> {
 
 async function shutdown(
   server: Awaited<ReturnType<typeof createAgentServer>>,
+  scheduler: Awaited<ReturnType<typeof createAutomationScheduler>>,
 ): Promise<void> {
   _currentStatus = 'stopped';
   console.log('Shutting down agent...');
+  scheduler.stop();
+  await closeMcpConnections(mcpConnections);
   await server.stop();
   process.exit(0);
 }
@@ -143,7 +194,7 @@ function buildContext(
     signal,
     group: agent.group,
     env: buildEnv(agent),
-    sendAgentMessage: sendAgentMessageHttp,
+    sendAgentMessage: (to, msg) => sendAgentMessageHttp(to, msg, homeDir),
   };
 }
 
@@ -154,13 +205,13 @@ function buildEnv(agent: AgentConfig): Record<string, string> {
   return env;
 }
 
-// agent.plugins holds MCP server names, not built-in tool names; it never
-// filters the built-in set. MCP runtime wiring is not implemented yet.
+// agent.plugins holds MCP server names; built-ins are always included.
+// MCP servers matching plugin names are connected at startup and their
+// tools are merged in as <server>__<tool>.
 function buildTools(
   sandboxed: boolean,
   homeDir: string,
   workspace: string,
-  agent: AgentConfig,
 ): Tool[] {
   const base = defaultTools();
   if (!sandboxed) {

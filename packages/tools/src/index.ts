@@ -1,4 +1,11 @@
 export { agentCreate, agentDelete, agentList, agentUpdate } from './agents.js';
+export {
+  automationCreate,
+  automationDelete,
+  automationList,
+  automationRun,
+  automationUpdate,
+} from './automations.js';
 export { fileTools } from './files.js';
 export { mcpCreate, mcpDelete, mcpList, mcpStatus, mcpUpdate } from './mcps.js';
 export { messageAgent } from './message_agent.js';
@@ -9,6 +16,13 @@ export { TmuxSession } from './tmux.js';
 
 import type { Tool } from '@agent-os/core';
 import { agentCreate, agentDelete, agentList, agentUpdate } from './agents.js';
+import {
+  automationCreate,
+  automationDelete,
+  automationList,
+  automationRun,
+  automationUpdate,
+} from './automations.js';
 import { fileTools } from './files.js';
 import { mcpCreate, mcpDelete, mcpList, mcpStatus, mcpUpdate } from './mcps.js';
 import { messageAgent } from './message_agent.js';
@@ -32,5 +46,10 @@ export function defaultTools(): Tool[] {
     mcpUpdate,
     mcpDelete,
     mcpStatus,
+    automationList,
+    automationCreate,
+    automationUpdate,
+    automationDelete,
+    automationRun,
   ];
 }

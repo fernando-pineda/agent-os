@@ -12,7 +12,8 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "check": "biome check ."
+    "check": "biome check .",
+    "supervisor:restart": "lsof -ti :8787 | xargs kill 2>/dev/null; sleep 1; cd apps/supervisor && nohup node dist/main.js > /tmp/agent-os-supervisor.log 2>&1 & sleep 2; curl -s localhost:8787/api/agents"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

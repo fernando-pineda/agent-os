@@ -157,6 +157,17 @@ interface Tool {
 }
 ```
 
+## MCP runtime wiring (agent startup)
+
+When an agent has `plugins?: string[]` (active MCP server names), the agent process connects to those MCP servers at startup and exposes their tools to the LLM loop. Servers are looked up from `GlobalConfig.mcpServers` by name.
+
+- stdio transport: spawned via `StdioClientTransport({ command, args, env, stderr: 'inherit' })`.
+- http transport: connected via `StreamableHTTPClientTransport(url, { requestInit: { headers } })`.
+- Each remote tool is exposed as `<serverName>__<toolName>` (e.g. `slack-eventors__slack_send_message`) to avoid name collisions with built-in tools.
+- Tool results are mapped to `ToolResult { ok, output }`; MCP `isError` flags map to `ok: false`.
+- Per-server connect timeout is 10s. A server that fails to connect logs a warning and contributes zero tools; it does not crash the agent or block other servers (`Promise.allSettled`).
+- All MCP connections are closed on agent shutdown (SIGTERM / SIGINT).
+
 ## Communication model (no Redis, no BullMQ)
 
 Everything is direct HTTP. packages/transport is DELETED.
@@ -268,3 +279,75 @@ Unit of isolation is the WORKSPACE, backed by a real macOS user `agentos-<worksp
 - AgentConfig.git credentials land in the agent user's own .gitconfig/.git-credentials, not shared.
 - sandbox-exec profile applied per task execution as defense-in-depth on top of OS-user isolation (optional, per-agent flag `sandboxed?: boolean`, default false in MVP).
 - packages/sandbox is now FUNCTIONAL for user management (requires sudo; commands surfaced to the human for confirmation before running) and provides sandbox-exec wrappers.
+
+## Automations
+
+Cron-triggered polling of MCP tools (e.g. Slack) without an LLM. Each automation calls a single MCP tool on a cron schedule, detects novelty since the last run via a cursor, and optionally delivers the result to the agent's inbox to wake it. No model tokens are spent; the agent loop is only invoked on delivery. Runs entirely inside the agent process using its existing MCP connections.
+
+### Storage
+
+- Automations are stored per agent in `<workspaceHome>/automations.json` as a JSON array of `Automation` objects.
+- Writes are atomic (write to temp file, then rename).
+- The scheduler library is `croner` (real cron syntax, TS-native). Each automation has a `Cron` instance with an arm/disarm pattern: armed when `enabled` and the agent is running, disarmed on stop or delete.
+
+### Automation interface
+
+```ts
+type AutomationDelivery = "inbox" | "silent";
+
+interface Automation {
+  id: string;          // uuid
+  name: string;        // human label
+  cron: string;        // 5-field cron expression
+  tool: string;        // MCP tool name, e.g. "slack-eventors__slack_search_messages"
+  args: Record<string, unknown>; // tool arguments; "{{cursor}}" placeholder supported in any string value
+  cursor?: string;     // opaque token persisted after each run; numeric timestamps compared numerically, never lexicographically
+  delivery: AutomationDelivery;
+  enabled: boolean;
+  lastRunAt?: string;  // ISO 8601
+  lastSummary?: string; // short text of the last run result or skip reason
+  createdAt: string;   // ISO 8601
+}
+```
+
+### Semantics
+
+- Cursor injection: any string value in `args` containing the literal `{{cursor}}` is replaced with the stored `cursor` value before the tool call. On the first run `cursor` is undefined, so the placeholder resolves to an empty string. After each run, the tool result is parsed as JSON (with a regex fallback for non-JSON output) and the highest numeric `ts` field found is extracted as the new cursor; it is persisted back to `automations.json`.
+- Cursor comparison is numeric when values look like timestamps (e.g. `1735689600.123456`). Two cursors are compared as floats, never as strings, so `"10"` is correctly newer than `"9"`.
+- Delivery `inbox`: after a successful tool call that produced novelty (cursor advanced), the agent process POSTs a summary to its own `/inbox` endpoint, which wakes the agent loop and injects the summary as a user message. This is a self-delivery, not agent-to-agent.
+- When the agent is busy (already running a turn, `/chat` or `/inbox` returns 409), the cursor still advances and is persisted, but delivery is skipped. `lastSummary` records the skip reason (e.g. `"agent busy, delivery skipped"`).
+- Delivery `silent`: the tool result and updated cursor are persisted to `automations.json` only. The agent is never woken. Useful for collecting state without spending tokens.
+- Disabled automations (`enabled: false`) are not scheduled; their `Cron` instance is disarmed.
+- All automation `Cron` instances are stopped on agent shutdown (SIGTERM / SIGINT).
+
+### Agent HTTP routes
+
+- `GET /api/agents/:id/automations` -> `{ automations: Automation[] }`
+- `POST /api/agents/:id/automations` body `CreateAutomationPayload` -> `Automation` (200). Validates cron syntax via `croner`; invalid cron returns 400.
+- `GET /api/agents/:id/automations/:automationId` -> `Automation` (404 if not found)
+- `PATCH /api/agents/:id/automations/:automationId` body `Partial<CreateAutomationPayload>` -> `Automation` (404 if not found). Re-arms the scheduler when `enabled` or `cron` changes.
+- `DELETE /api/agents/:id/automations/:automationId` -> `{ ok: true }` (404 if not found). Disarms and removes from `automations.json`.
+- `POST /api/agents/:id/automations/:automationId/run` -> `{ ok: boolean; summary?: string }` (200). Triggers an immediate run of the automation (bypasses the cron schedule), executes the tool, updates the cursor and `lastRunAt`/`lastSummary`, and performs delivery if applicable.
+- `GET /api/agents/:id/tools` -> `{ tools: { name: string; description: string }[] }`. Lists all tools currently available to the agent (built-in + MCP remote tools as `<serverName>__<toolName>`).
+
+### Supervisor proxy routes
+
+The supervisor proxies the agent routes to avoid CORS and port juggling in the web UI:
+
+- `GET /api/agents/:id/automations` -> forwards to agent `GET /automations`
+- `POST /api/agents/:id/automations` -> forwards body to agent `POST /automations`
+- `GET /api/agents/:id/automations/:automationId` -> forwards to agent `GET /automations/:automationId`
+- `PATCH /api/agents/:id/automations/:automationId` -> forwards body to agent `PATCH /automations/:automationId`
+- `DELETE /api/agents/:id/automations/:automationId` -> forwards to agent `DELETE /automations/:automationId`
+- `POST /api/agents/:id/automations/:automationId/run` -> forwards to agent `POST /automations/:automationId/run`
+- `GET /api/agents/:id/tools` -> forwards to agent `GET /tools`
+
+### Built-in tools (agent LLM loop)
+
+The agent exposes automation management as built-in tools so the LLM can self-manage automations during a conversation:
+
+- `automation_list` -> returns all automations for this agent.
+- `automation_create` -> creates a new automation (args: name, cron, tool, args, delivery, enabled).
+- `automation_update` -> updates an existing automation by id.
+- `automation_delete` -> deletes an automation by id.
+- `automation_run` -> runs an automation immediately by id.
