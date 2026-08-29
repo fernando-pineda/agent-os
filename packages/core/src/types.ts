@@ -139,7 +139,7 @@ export interface ToolContext {
   sendAgentMessage?: (
     toAgentId: string,
     message: string,
-    opts?: { replyDepth?: number },
+    opts?: { replyDepth?: number; taskId?: string },
   ) => Promise<string>;
   /** Depth of the current agent-to-agent reply chain, for loop guards. */
   replyDepth?: number;

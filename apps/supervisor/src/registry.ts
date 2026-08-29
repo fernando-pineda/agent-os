@@ -312,7 +312,7 @@ export async function createAgent(
     );
   }
 
-  const port = allocatePort(registry);
+  const port = await allocatePort(registry);
   const entry: RegistryEntry = {
     id,
     port,
@@ -339,7 +339,7 @@ export async function startAgent(
   const config = await readAgentConfig(id);
   if (!config) return null;
   const workspace = config.workspace ?? config.id;
-  const entry = getOrCreateEntry(registry, id);
+  const entry = await getOrCreateEntry(registry, id);
   entry.status = 'starting';
   entry.manualStop = false;
   await saveRegistry(registry);
@@ -356,31 +356,9 @@ export async function stopAgent(
 ): Promise<AgentInfo | null> {
   const config = await readAgentConfig(id);
   if (!config) return null;
-  const entry = getOrCreateEntry(registry, id);
+  const entry = await getOrCreateEntry(registry, id);
 
-  const pids = await findAgentPids(entry);
-  if (entry.pid > 0) {
-    pids.add(entry.pid);
-  }
-
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Process may already be gone.
-    }
-  }
-  for (const pid of pids) {
-    await waitForExit(pid, 5000);
-  }
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 0);
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Process already exited.
-    }
-  }
+  await killAgentProcesses(entry, id);
 
   try {
     const hasSession = await runCommand('tmux', [
@@ -412,6 +390,22 @@ export async function stopAgent(
   return toAgentInfo(config, 'stopped', 'unknown');
 }
 
+// Resolve the agent dist main.js path so pgrep can match it. Mirrors the
+// candidate logic in spawnAgentProcess.
+function agentDistPath(): string | null {
+  const candidates = [
+    fileURLToPath(new URL('../../agent/dist/main.js', import.meta.url)),
+    fileURLToPath(
+      new URL('../node_modules/@agent-os/agent/dist/main.js', import.meta.url),
+    ),
+  ];
+  return candidates[0] ?? candidates[1] ?? null;
+}
+
+// Find pids listening on the entry port (lsof), plus the tmux pane pid, plus
+// any node process whose command line matches the agent dist path filtered by
+// AGENT_ID=<id>. This catches orphan processes even when the registry entry
+// is stale or its port is wrong.
 async function findAgentPids(entry: RegistryEntry): Promise<Set<number>> {
   const pids = new Set<number>();
   try {
@@ -430,6 +424,101 @@ async function findAgentPids(entry: RegistryEntry): Promise<Set<number>> {
     // lsof may fail when no listener is present.
   }
   return pids;
+}
+
+// tmux pane pid for the agent session; the node child runs as the pane process.
+async function findTmuxPid(id: string): Promise<number | undefined> {
+  try {
+    const stdout = await runCommandForOutput('tmux', [
+      'list-panes',
+      '-t',
+      `agent-os-${id}`,
+      '-F',
+      '#{pid}',
+    ]);
+    const pid = Number.parseInt(stdout.trim(), 10);
+    if (pid > 0 && pid !== process.pid) return pid;
+  } catch {
+    // Session may not exist.
+  }
+  return undefined;
+}
+
+// pgrep for node processes whose command line contains the agent dist main.js
+// path, then filter by AGENT_ID env (env is not in the command line, so we
+// inspect each pid's environment via ps -E).
+async function findPgrepPids(id: string): Promise<Set<number>> {
+  const pids = new Set<number>();
+  const distPath = agentDistPath();
+  if (!distPath) return pids;
+  try {
+    const stdout = await runCommandForOutput('pgrep', ['-f', distPath]);
+    for (const line of stdout.split('\n')) {
+      const pid = Number.parseInt(line.trim(), 10);
+      if (pid <= 0 || pid === process.pid) continue;
+      const pidId = await extractAgentIdFromPid(pid);
+      if (pidId === id) pids.add(pid);
+    }
+  } catch {
+    // pgrep returns non-zero when no match.
+  }
+  return pids;
+}
+
+// All pids for an agent by id: entry port listener, tmux pane, and pgrep match.
+export async function findAllAgentPids(
+  entry: RegistryEntry | undefined,
+  id: string,
+): Promise<Set<number>> {
+  const pids = new Set<number>();
+  if (entry) {
+    for (const pid of await findAgentPids(entry)) pids.add(pid);
+  }
+  const tmuxPid = await findTmuxPid(id);
+  if (tmuxPid) pids.add(tmuxPid);
+  for (const pid of await findPgrepPids(id)) pids.add(pid);
+  if (entry?.pid && entry.pid > 0) pids.add(entry.pid);
+  return pids;
+}
+
+// Kill all pids for an agent, wait, SIGKILL stragglers, then verify the port
+// (if known) is actually freed. Centralizes the stop logic so deleteAgent and
+// stopAgent share it.
+export async function killAgentProcesses(
+  entry: RegistryEntry | undefined,
+  id: string,
+): Promise<void> {
+  const pids = await findAllAgentPids(entry, id);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process may already be gone.
+    }
+  }
+  for (const pid of pids) {
+    await waitForExit(pid, 5000);
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Process already exited.
+    }
+  }
+  if (entry) {
+    await waitForPortFree(entry.port, 3000);
+  }
+}
+
+// Wait until lsof reports no listener on the port, or timeout.
+async function waitForPortFree(port: number, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await isPortFree(port)) return;
+    await sleep(200);
+  }
 }
 
 async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
@@ -490,17 +579,81 @@ export async function reconcileOnBoot(registry: Registry): Promise<void> {
     entry.pid = 0;
   }
   await saveRegistry(registry);
+  await reapOrphanAgents(registry);
 }
 
-export function getOrCreateEntry(
+// On startup, kill agent processes whose config dir was deleted or whose id
+// has no registry entry. Only processes matching the agent dist main.js path
+// are considered, never unrelated node processes.
+async function reapOrphanAgents(registry: Registry): Promise<void> {
+  const knownIds = new Set(registry.agents.map((a) => a.id));
+  const orphans = await findOrphanAgentIds();
+  for (const id of orphans) {
+    if (knownIds.has(id)) continue;
+    const configExists = await readAgentConfig(id);
+    if (configExists) continue;
+    console.warn(`Reaping orphan agent process for ${id}`);
+    await killAgentProcesses(undefined, id);
+    try {
+      await runCommand('tmux', ['kill-session', '-t', `agent-os-${id}`]);
+    } catch {
+      // Session may already be gone.
+    }
+  }
+}
+
+// pgrep for node processes running the agent dist main.js, then extract the
+// AGENT_ID from each process command line. Returns ids of running agents.
+async function findOrphanAgentIds(): Promise<string[]> {
+  const distPath = agentDistPath();
+  if (!distPath) return [];
+  const ids: string[] = [];
+  try {
+    const stdout = await runCommandForOutput('pgrep', ['-f', distPath]);
+    for (const line of stdout.split('\n')) {
+      const pid = Number.parseInt(line.trim(), 10);
+      if (pid <= 0 || pid === process.pid) continue;
+      const id = await extractAgentIdFromPid(pid);
+      if (id) ids.push(id);
+    }
+  } catch {
+    // pgrep returns non-zero when no match.
+  }
+  return ids;
+}
+
+// Read the process command line and environment, pull out AGENT_ID=<id>.
+// macOS ps uses -E to show env; Linux ps uses the BSD-style 'e' modifier.
+async function extractAgentIdFromPid(pid: number): Promise<string | undefined> {
+  // macOS: ps -E -p <pid> -o command=
+  const macId = await tryPsEnv(['-E', '-p', String(pid), '-o', 'command=']);
+  if (macId) return macId;
+  // Linux: ps -p <pid> -o command= e (BSD-style env modifier)
+  const linuxId = await tryPsEnv(['-p', String(pid), '-o', 'command=', 'e']);
+  if (linuxId) return linuxId;
+  return undefined;
+}
+
+async function tryPsEnv(args: string[]): Promise<string | undefined> {
+  try {
+    const stdout = await runCommandForOutput('ps', args);
+    const match = /AGENT_ID=([a-z0-9-]+)/.exec(stdout);
+    if (match?.[1]) return match[1];
+  } catch {
+    // Process may have exited or flag unsupported.
+  }
+  return undefined;
+}
+
+export async function getOrCreateEntry(
   registry: Registry,
   id: string,
-): RegistryEntry {
+): Promise<RegistryEntry> {
   let entry = registry.agents.find((a) => a.id === id);
   if (!entry) {
     entry = {
       id,
-      port: allocatePort(registry),
+      port: await allocatePort(registry),
       pid: 0,
       status: 'stopped',
     };
@@ -509,11 +662,29 @@ export function getOrCreateEntry(
   return entry;
 }
 
-function allocatePort(registry: Registry): number {
+// Probe whether a TCP port is actually free, not just absent from the registry.
+// lsof is present on macOS and Linux; errors are treated as "assume free" so a
+// missing lsof never blocks agent creation.
+async function isPortFree(port: number): Promise<boolean> {
+  try {
+    const stdout = await runCommandForOutput('lsof', [
+      '-ti',
+      `tcp:${port}`,
+      '-sTCP:LISTEN',
+    ]);
+    return stdout.trim().length === 0;
+  } catch {
+    return true;
+  }
+}
+
+// Pick the smallest port that is neither in the registry nor actually bound.
+// This skips ports held by orphan processes whose registry entry was lost.
+async function allocatePort(registry: Registry): Promise<number> {
   const base = 9100;
   const used = new Set(registry.agents.map((a) => a.port));
   let port = base;
-  while (used.has(port)) {
+  while (used.has(port) || !(await isPortFree(port))) {
     port++;
   }
   return port;
@@ -557,7 +728,7 @@ async function spawnAgentProcess(
     };
   }
 
-  const entry = getOrCreateEntry(registry, id);
+  const entry = await getOrCreateEntry(registry, id);
   const workspaceHome = homeDirForWorkspace(workspace);
   const username = usernameForWorkspace(workspace);
   const exists = await userExists(workspace);

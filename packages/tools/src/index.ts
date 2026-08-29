@@ -10,8 +10,10 @@ export { fileTools } from './files.js';
 export { mcpCreate, mcpDelete, mcpList, mcpStatus, mcpUpdate } from './mcps.js';
 export { messageAgent } from './message_agent.js';
 export { screenshot } from './screenshot.js';
+export { screenshot_desktop } from './screenshot_desktop.js';
 export { shell } from './shell.js';
 export { simctl } from './simctl.js';
+export { taskCreate, taskGet, taskList, taskUpdate } from './tasks.js';
 export { TmuxSession } from './tmux.js';
 
 import type { Tool } from '@agent-os/core';
@@ -27,8 +29,10 @@ import { fileTools } from './files.js';
 import { mcpCreate, mcpDelete, mcpList, mcpStatus, mcpUpdate } from './mcps.js';
 import { messageAgent } from './message_agent.js';
 import { screenshot } from './screenshot.js';
+import { screenshot_desktop } from './screenshot_desktop.js';
 import { shell } from './shell.js';
 import { simctl } from './simctl.js';
+import { taskCreate, taskGet, taskList, taskUpdate } from './tasks.js';
 
 export function defaultTools(): Tool[] {
   return [
@@ -36,6 +40,7 @@ export function defaultTools(): Tool[] {
     ...fileTools,
     simctl,
     screenshot,
+    screenshot_desktop,
     messageAgent,
     agentList,
     agentCreate,
@@ -46,6 +51,10 @@ export function defaultTools(): Tool[] {
     mcpUpdate,
     mcpDelete,
     mcpStatus,
+    taskList,
+    taskCreate,
+    taskUpdate,
+    taskGet,
     automationList,
     automationCreate,
     automationUpdate,

@@ -109,7 +109,13 @@ async function main(): Promise<void> {
     buildContext: (signal) =>
       buildContext(agentId, workspace, homeDir, signal, agent),
     sendAgentMessage: (to, msg, opts) =>
-      sendAgentMessageHttp(to, msg, homeDir, opts?.replyDepth ?? 0),
+      sendAgentMessageHttp(
+        to,
+        msg,
+        homeDir,
+        opts?.replyDepth ?? 0,
+        opts?.taskId,
+      ),
     onPluginsReload: async () => {
       const fresh = await loadAgentConfig(agentId);
       const plugins = fresh.agent.plugins ?? [];
@@ -203,7 +209,13 @@ function buildContext(
     group: agent.group,
     env: buildEnv(agent),
     sendAgentMessage: (to, msg, opts) =>
-      sendAgentMessageHttp(to, msg, homeDir, opts?.replyDepth ?? 0),
+      sendAgentMessageHttp(
+        to,
+        msg,
+        homeDir,
+        opts?.replyDepth ?? 0,
+        opts?.taskId,
+      ),
   };
 }
 

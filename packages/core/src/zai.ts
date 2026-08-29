@@ -171,7 +171,11 @@ function toAnthropicMessages(messages: ChatMessage[]): {
           type: 'image',
           source: {
             type: 'base64',
-            media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+            media_type: img.mimeType as
+              | 'image/jpeg'
+              | 'image/png'
+              | 'image/gif'
+              | 'image/webp',
             data: img.data,
           },
         });

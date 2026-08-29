@@ -188,13 +188,13 @@ Everything is direct HTTP. packages/transport is DELETED.
 
 - `POST /chat` AI SDK data-stream protocol. Body `{ messages: UIMessage[] }`. UIMessage parts may include `{ type: "image", image: <data-url>, mimeType }` for user messages. Runs the agent loop, streams AI SDK frames (text `0:`, tool `b:/c:/a:`, file `k:`) via assistant-stream DataStreamResponse. Tool results carrying `images` (e.g. the `screenshot` tool) are streamed as `k:` file parts and persisted as image parts on the assistant message. Persists the thread to `<workspaceHome>/thread.json` on completion. When the agent's model does not support vision, image parts are stripped before sending to the LLM but remain in the persisted thread.
 - `GET /messages` returns the persisted thread messages (UIMessage[]) for UI history load.
-- `POST /inbox` agent-to-agent. Body `{ fromAgentId, taskId, message }`. Injects as a user message prefixed `Message from agent <from>:` into the loop and returns the reply text. The reply is also persisted to the thread.
+- `POST /inbox` agent-to-agent. Body `{ fromAgentId?, taskId?, message?, replyTo?, inReplyTo?, replyDepth? }`. `taskId` defaults to a fresh uuid when absent. Injects as a user message prefixed `[agent-os:inbox from=<from> task=<taskId>] Message from agent <from>:` (or `Reply from agent` when `inReplyTo` is set) into the loop and returns `{ accepted: true, id }` with status 202. `taskId` is carried into the persisted inbound message metadata. The reply is also persisted to the thread.
 - `GET /health` -> `{ ok: true, status: AgentStatus, currentTaskId?: string }`
 - Concurrency: one run at a time; concurrent /chat or /inbox gets 409.
 
 ### Agent-to-agent (message_agent tool)
 
-The tool context hook `sendAgentMessage(toAgentId, message)` reads the registry file, POSTs to `http://localhost:<port>/inbox`, returns the reply as ToolResult. In the UI it renders as a normal tool-call part ("message sent to X", then the reply as result).
+The tool context hook `sendAgentMessage(toAgentId, message, opts?: { replyDepth?, taskId? })` reads the registry file, POSTs to `http://localhost:<port>/inbox` with `{ fromAgentId, taskId, message, replyTo, inReplyTo, replyDepth }`. When no `taskId` is passed a fresh uuid is generated. On 409 (target busy) the message is queued to `<workspaceHome>/outbox.jsonl` (each `OutboxEntry` carries `taskId` when present) and retried via `deliverWithRetry`, which includes `taskId` in the POST body. The tool output confirms with the `taskId` when present. In the UI it renders as a normal tool-call part. Replies always go through the visible `message_agent` tool; there is no invisible auto-forward. The prompt instructs the model to reuse an incoming `[task <id>]` in its reply and to pass a short `taskId` when starting new work.
 
 ### Supervisor (apps/supervisor, no queue, no Redis)
 
@@ -360,6 +360,32 @@ The agent exposes automation management as built-in tools so the LLM can self-ma
 - `automation_delete` -> deletes an automation by id.
 - `automation_run` -> runs an automation immediately by id.
 
-### Screenshot tool
+### Screenshot tools
 
-The `screenshot` tool (packages/tools) captures a web page via Playwright and saves the PNG to `<homeDir>/<outputPath>`. After saving, it reads the file back and returns `ToolResult { ok: true, output: <path>, images: [{ data: <base64>, mimeType: "image/png" }] }`. The `images` field surfaces the capture in the chat UI (streamed live as a `k:` file part, persisted as an image part on the assistant message). Image parts on assistant messages are not re-sent to the LLM.
+The `screenshot` tool (packages/tools) captures a web page via Playwright and saves the PNG to `<homeDir>/<outputPath>`. The `screenshot_desktop` tool captures the macOS screen via `screencapture -x <path>`, saving to `<homeDir>/desktop_screenshot.png` by default; optional `outputPath` (joined to homeDir) and `display` (maps to `screencapture -D <n>`) args are supported. Both read the file back and return `ToolResult { ok: true, output: <path>, images: [{ data: <base64>, mimeType: "image/png" }] }`. The `images` field surfaces the capture in the chat UI (streamed live as a `k:` file part, persisted as an image part on the assistant message). Image parts on assistant messages are not re-sent to the LLM.
+
+### Task tracker
+
+A generic per-agent task tracker persisted at `<homeDir>/tasks.json` as a JSON array of task records. Writes are atomic (write to temp file, then rename) and serialized via a module-level promise queue per home dir. Agnostic by design; it tracks items with state and knows nothing about any specific pipeline.
+
+```ts
+type TaskStatus = "open" | "in_progress" | "blocked" | "done";
+
+interface TaskRecord {
+  id: string;          // slug from title + random suffix when not provided
+  title: string;       // non-empty
+  status: TaskStatus;  // default "open" on create
+  notes?: string;      // optional free-form text
+  createdAt: string;   // ISO 8601
+  updatedAt: string;   // ISO 8601, refreshed on every update
+}
+```
+
+Built-in tools exposed to the agent LLM loop:
+
+- `task_list` -> no required params. Optional `status` filters by one of the four statuses. Returns a JSON array of all matching tasks (empty array when the file is missing or empty).
+- `task_create` -> required `title` (non-empty string). Optional `status` (default `open`), `notes` (string), `id` (auto-generated slug from the title plus a random suffix when omitted). Returns the created task as JSON. Rejects duplicate `id`.
+- `task_update` -> required `id`. Optional `title`, `status`, `notes`. Updates only the supplied fields, sets `updatedAt`. Returns the updated task as JSON. Returns `{ ok: false, output: "task not found: <id>" }` when `id` does not exist.
+- `task_get` -> required `id`. Returns the task as JSON, or a not-found error when `id` does not exist.
+
+Validation: `status` must be one of the four enum values; `title` must be non-empty.

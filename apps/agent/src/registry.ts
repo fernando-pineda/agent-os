@@ -38,10 +38,14 @@ export async function findPortFor(
 }
 
 export async function myPort(agentId: string): Promise<number | undefined> {
+  // The registry file is the source of truth; the supervisor writes it and the
+  // health poller reads it, so prefer it over AGENT_PORT env to avoid mismatch.
+  const registryPort = await findPortFor(agentId);
+  if (registryPort !== undefined) return registryPort;
   const envPort = process.env.AGENT_PORT;
   if (envPort) {
     const parsed = Number(envPort);
     if (!Number.isNaN(parsed)) return parsed;
   }
-  return findPortFor(agentId);
+  return undefined;
 }

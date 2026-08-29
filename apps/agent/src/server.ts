@@ -58,7 +58,7 @@ export interface ServerDeps {
   sendAgentMessage: (
     toAgentId: string,
     message: string,
-    opts?: { replyDepth?: number },
+    opts?: { replyDepth?: number; taskId?: string },
   ) => Promise<string>;
   onMessagesPersisted?: (messages: UIMessage[]) => void;
   scheduler?: AutomationScheduler;
@@ -682,7 +682,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     const chatMessages: ChatMessage[] = [
       {
         role: 'user',
-        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''}] ${prefix} ${body.fromAgentId}: ${body.message}${closingNote}${turnReminder}`,
+        content: `[agent-os:inbox from=${body.fromAgentId}${body.inReplyTo ? ' reply' : ''} task=${body.taskId}] ${prefix} ${body.fromAgentId}: ${body.message}${closingNote}${turnReminder}`,
       },
     ];
 
@@ -693,6 +693,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         fromAgentId: body.fromAgentId,
         replyDepth: depth,
         atCap,
+        taskId: body.taskId,
         ...(body.inReplyTo ? { inReplyTo: body.inReplyTo } : {}),
       },
       chatMessages,
@@ -710,6 +711,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       inReplyTo?: string;
       replyDepth: number;
       atCap: boolean;
+      taskId: string;
     },
     chatMessages: ChatMessage[],
     serverDeps: ServerDeps,
@@ -756,42 +758,6 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           handleStreamEvent(event, undefined, toolContexts, segments);
         },
       });
-      // Auto-deliver: if the turn did real work (used a non-messaging tool) and
-      // ended with text but never called message_agent back, that answer would
-      // be lost (plain text is not delivered between agents). Forward it to the
-      // sender. Skip when nothing but text was produced (a social close-out is
-      // local, not a reply) and at the reply cap, where the point is to stop.
-      if (!body.atCap) {
-        const calledBack = segments.some(
-          (s) => s.kind === 'tool' && s.toolName === 'message_agent',
-        );
-        const didWork = segments.some(
-          (s) => s.kind === 'tool' && s.toolName !== 'message_agent',
-        );
-        const finalText = [...segments]
-          .reverse()
-          .find((s) => s.kind === 'text' && s.text && s.text.trim())
-          ?.text?.trim();
-        if (!calledBack && didWork && finalText) {
-          const nextDepth = body.replyDepth + 1;
-          const delivered = await serverDeps.sendAgentMessage(
-            body.fromAgentId,
-            finalText,
-            { replyDepth: nextDepth },
-          );
-          console.log(`Auto-delivered inbox reply to ${body.fromAgentId}`, {
-            depth: nextDepth,
-            delivered,
-          });
-          segments.push({
-            kind: 'tool',
-            toolCallId: `auto-${crypto.randomUUID()}`,
-            toolName: 'message_agent',
-            args: { toAgentId: body.fromAgentId, message: finalText },
-            result: delivered,
-          });
-        }
-      }
       // Persist the inbound message so the UI can surface it and the model
       // sees it in context after restarts. replyToAgentId marks the assistant
       // messages as replies to the sender so the replied chip survives reloads.
@@ -807,6 +773,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         metadata: {
           agentOsInbox: true,
           fromAgentId: body.fromAgentId,
+          taskId: body.taskId,
           ...(body.inReplyTo ? { reply: true } : {}),
         },
       };
@@ -1017,6 +984,7 @@ export async function sendAgentMessageHttp(
   message: string,
   homeDir?: string,
   replyDepth = 0,
+  taskId?: string,
 ): Promise<string> {
   const fromAgentId = process.env.AGENT_ID ?? 'unknown';
   const port = await findPortFor(toAgentId);
@@ -1024,13 +992,15 @@ export async function sendAgentMessageHttp(
     return `Agent ${toAgentId} is unreachable (not running?).`;
   }
 
+  const resolvedTaskId = taskId ?? crypto.randomUUID();
+
   try {
     const res = await fetch(`http://localhost:${port}/inbox`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         fromAgentId,
-        taskId: crypto.randomUUID(),
+        taskId: resolvedTaskId,
         message,
         replyTo: fromAgentId,
         // Depth tags the reply chain so the receiver can stop at the cap.
@@ -1047,6 +1017,7 @@ export async function sendAgentMessageHttp(
           message,
           inReplyTo: fromAgentId,
           ts: Date.now(),
+          taskId: resolvedTaskId,
         });
         return `Agent ${toAgentId} is busy; your message was queued and will be delivered when they are free.`;
       }

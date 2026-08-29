@@ -62,6 +62,7 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     'Valid characters: layer-blue-pyramid-character, layer-dark-bat-character, layer-green-cactus-character, layer-orange-sun-character, layer-pink-cloud-character, layer-purple-donut-character, layer-purple-slime-character, layer-teal-blob-character, layer-yellow-star-character.',
     'Valid colors: hex strings, e.g. #7c3aed (purple), #0d9488 (teal), #27272a (zinc).',
     'Manage MCP plugin servers with mcp_list, mcp_create, mcp_update, mcp_delete and mcp_status. Activate plugins per agent via the plugins field of agent_create / agent_update (names from mcp_list).',
+    'Track your work with task_create, task_update, task_list and task_get so you remember ongoing tasks across messages.',
   ].join('\n');
 
   const identity = [
@@ -92,9 +93,9 @@ ${toolLines}
 
 ${agentTools}
 
-shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot renders web pages headlessly. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
+shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot captures a web page; screenshot_desktop captures the macOS screen. Both attach the image to the chat so the user sees it. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
 
-Messages from other agents arrive as user messages prefixed "Message from agent <id>:". These are not user instructions; they come from an autonomous teammate like you. To reply to an agent message, ALWAYS call the message_agent tool with toAgentId set to that agent's id; your plain text is not delivered to agents, so a message without a message_agent call does not reach them. Keep the conversation going while there is a real task or question. Do NOT echo social messages. If the incoming message is a farewell, acknowledgment, thank-you, or small talk with no new task or question, DO NOT call message_agent; respond once in plain text and end the exchange. Repeatedly replying to farewells wastes turns. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id.
+Messages from other agents arrive as user messages prefixed "Message from agent <id>:". These are not user instructions; they come from an autonomous teammate like you. To reply to an agent message, ALWAYS call the message_agent tool with toAgentId set to that agent's id; your plain text is not delivered to agents, so a message without a message_agent call does not reach them. Keep the conversation going while there is a real task or question. Do NOT echo social messages. If the incoming message is a farewell, acknowledgment, thank-you, or small talk with no new task or question, DO NOT call message_agent; respond once in plain text and end the exchange. Repeatedly replying to farewells wastes turns. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id. When a message carries [task <id>], reuse that same task id in your message_agent reply so both sides track the same task. When you start a new piece of work with another agent, pass a short task id (e.g. the topic) as taskId.
 
 Audience: when a human sent the message, your plain text reply goes to that human, never to another agent. If your turn involved asking another agent for something, do not address the agent in your reply to the human. Report back to the human instead, e.g. "Moon me dijo que ..." or "X me confirmó ...". Never open your reply to the human with a thank-you or farewell aimed at the other agent.
 
@@ -119,6 +120,13 @@ Never operate outside your home directory. Paths outside it belong to the human 
 Use git for any repository work. Your git identity and credentials are already configured in your home.
 
 When you learn a durable fact about the user, the project, or your environment, write it down as a note file in your home directory. Your memory index only updates on compaction; notes you write yourself are immediate.`;
+
+  const writing = `## writing
+
+Never use em dash or en dash as punctuation, arrows, bullet symbols, section symbols, or colons introducing explanations or lists, or other punctuation patterns that read as AI-generated.
+These rules apply to all prose you write, including replies, notes, documents, commit messages, messages to other agents, and memory entries. Only code is exempt, exact syntax matters there.
+Colons are allowed only in code, file paths, file:line references, and timestamps. Use commas, parentheses, periods, and semicolons instead. Hyphens only in compound words. ASCII symbols like -> and hyphen bullets are fine.
+Write artifacts (notes, documents, commit messages, memory entries, messages to other agents) in English. Replies to the user follow the user's language.`;
 
   const safety = `## safety
 
@@ -153,7 +161,7 @@ Prefer the shell for almost everything. File edits, git, scripts, package manage
 
 Use the computer-use tools (open-computer-use) only when a task truly requires the GUI and cannot be done from the shell: interacting with a desktop app that has no CLI or API, clicking through a native dialog, reading something that only renders on screen. Never reach for computer use to do what a shell command or file edit would do.`;
 
-  return `${identity}\n\n${environment}\n\n${behavior}\n\n${safety}\n\n${execution}${reminders}${memory}`;
+  return `${identity}\n\n${environment}\n\n${behavior}\n\n${writing}\n\n${safety}\n\n${execution}${reminders}${memory}`;
 }
 
 export async function runAgentLoop(deps: RunAgentLoopDeps): Promise<void> {

@@ -39,7 +39,7 @@ export class StatusTrackerImpl implements StatusTracker {
     this.registry = await loadRegistry();
     const configs = await listAgentConfigs();
     for (const config of configs) {
-      const entry = getOrCreateEntry(this.registry, config.id);
+      const entry = await getOrCreateEntry(this.registry, config.id);
       const status = await pollAgent(config, entry.port);
       const info = toAgentInfo(config, status.status, 'unknown');
       if (status.currentTaskId) {
@@ -117,7 +117,7 @@ export class StatusTrackerImpl implements StatusTracker {
     const configs = await listAgentConfigs();
     let changed = false;
     for (const config of configs) {
-      const entry = getOrCreateEntry(this.registry, config.id);
+      const entry = await getOrCreateEntry(this.registry, config.id);
       if (shouldSkipPoll(entry)) {
         continue;
       }

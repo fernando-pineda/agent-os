@@ -7,6 +7,7 @@ export interface OutboxEntry {
   message: string;
   inReplyTo: string;
   ts: number;
+  taskId?: string;
 }
 
 const RETRY_DELAYS: number[] = [2000, 5000, 15000, 30000];
@@ -97,6 +98,7 @@ export async function deliverWithRetry(
   toAgentId: string,
   message: string,
   inReplyTo: string,
+  taskId?: string,
 ): Promise<boolean> {
   const port = await findPortFor(toAgentId);
   if (!port) {
@@ -117,6 +119,7 @@ export async function deliverWithRetry(
           fromAgentId,
           message,
           inReplyTo,
+          ...(taskId ? { taskId } : {}),
         }),
       });
       if (res.ok) {
@@ -147,6 +150,7 @@ export async function drainOutbox(
       entry.toAgentId,
       entry.message,
       entry.inReplyTo,
+      entry.taskId,
     );
     if (ok) {
       await removeOutbox(homeDir, entry);
