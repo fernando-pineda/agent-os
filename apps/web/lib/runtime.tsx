@@ -42,6 +42,18 @@ type ToolPart = {
 
 type MsgImage = { data: string; mimeType: string };
 
+// crypto.randomUUID is only available in secure contexts (HTTPS/localhost).
+// On plain-HTTP deployments (e.g. EC2 by IP) it is undefined, so fall back.
+function uid(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 type Msg = {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -278,7 +290,7 @@ function extractMessageAgentChips(
         lower.startsWith('busy') ||
         lower.startsWith('unreachable');
       chips.push({
-        toolCallId: String(o.toolCallId ?? crypto.randomUUID()),
+        toolCallId: String(o.toolCallId ?? uid()),
         toAgentId,
         state: failed ? 'failed' : 'sent',
       });
@@ -469,7 +481,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       }
 
       const userMsg: Msg = {
-        id: crypto.randomUUID(),
+        id: uid(),
         role: 'user',
         text,
         ...(images.length > 0 && { images }),
@@ -480,7 +492,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
 
       // Each text run and each tool call is its own message, in order.
       let current: Msg = {
-        id: crypto.randomUUID(),
+        id: uid(),
         role: 'assistant',
         text: '',
         toolParts: [],
@@ -495,7 +507,7 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
 
       const startNew = (toolParts?: ToolPart[]): Msg => {
         current = {
-          id: crypto.randomUUID(),
+          id: uid(),
           role: 'assistant',
           text: '',
           ...(toolParts ? { toolParts } : {}),
