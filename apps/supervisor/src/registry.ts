@@ -312,14 +312,12 @@ export async function createAgent(
     );
   }
 
-  const port = await allocatePort(registry);
-  const entry: RegistryEntry = {
-    id,
-    port,
-    pid: 0,
-    status: 'starting',
-  };
-  registry.agents.push(entry);
+  // Use getOrCreateEntry so the port is assigned atomically and reused by
+  // spawnAgentProcess below, guaranteeing the spawned process binds the exact
+  // port recorded in the registry.
+  const entry = await getOrCreateEntry(registry, id);
+  entry.status = 'starting';
+  entry.pid = 0;
   await saveRegistry(registry);
 
   const spawnResult = await spawnAgentProcess(registry, id, workspace);
@@ -647,16 +645,44 @@ export async function getOrCreateEntry(
   registry: Registry,
   id: string,
 ): Promise<RegistryEntry> {
-  let entry = registry.agents.find((a) => a.id === id);
-  if (!entry) {
-    entry = {
-      id,
-      port: await allocatePort(registry),
-      pid: 0,
-      status: 'stopped',
-    };
-    registry.agents.push(entry);
+  const existing = registry.agents.find((a) => a.id === id);
+  if (existing) return existing;
+
+  // No entry in this in-memory copy. Reload from disk so we see entries (and
+  // ports) other concurrent writers (e.g. the status tracker tick) may have
+  // just persisted, including one for this very id.
+  const disk = await loadRegistry();
+
+  // A concurrent writer may already have created this id on disk. Reuse that
+  // entry verbatim so its port stays stable instead of allocating a new one.
+  const diskEntry = disk.agents.find((a) => a.id === id);
+  if (diskEntry) {
+    // Merge any disk entries our in-memory copy lacks, then persist for
+    // consistency and return the canonical entry.
+    const seen = new Set(registry.agents.map((a) => a.id));
+    for (const d of disk.agents) {
+      if (!seen.has(d.id)) registry.agents.push(d);
+    }
+    await saveRegistry(registry);
+    return registry.agents.find((a) => a.id === id)!;
   }
+
+  // Truly new id: allocate against the fresh disk view so we never collide
+  // with a port another writer just recorded, then persist so the port is
+  // authoritative before we return.
+  const port = await allocatePort(disk);
+  const entry: RegistryEntry = {
+    id,
+    port,
+    pid: 0,
+    status: 'stopped',
+  };
+  const seen = new Set(registry.agents.map((a) => a.id));
+  for (const d of disk.agents) {
+    if (!seen.has(d.id)) registry.agents.push(d);
+  }
+  registry.agents.push(entry);
+  await saveRegistry(registry);
   return entry;
 }
 
