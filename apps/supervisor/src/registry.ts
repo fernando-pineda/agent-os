@@ -25,6 +25,7 @@ import {
   usernameForWorkspace,
 } from '@agent-os/sandbox';
 import { uninstallLaunchdAgent } from './launchd.js';
+import { listMcpServers } from './mcps.js';
 import { listModels } from './onboarding.js';
 
 export const AGENTS_ROOT = join(homedir(), '.agent-os', 'agents');
@@ -284,7 +285,11 @@ export async function createAgent(
   if (input.sandboxed) config.sandboxed = input.sandboxed;
   if (input.avatar) config.avatar = input.avatar;
   if (input.instructions) config.instructions = input.instructions;
-  const plugins = [...new Set([...(input.plugins ?? []), ...DEFAULT_PLUGINS])];
+  // Apply default plugins only when they exist in the MCP catalog; otherwise
+  // creation would 400 on names that are not configured on this host.
+  const configured = new Set((await listMcpServers()).map((s) => s.name));
+  const defaults = DEFAULT_PLUGINS.filter((p) => configured.has(p));
+  const plugins = [...new Set([...(input.plugins ?? []), ...defaults])];
   if (plugins.length > 0) config.plugins = plugins;
   if (input.reminders) config.reminders = input.reminders;
   if (input.git) {
