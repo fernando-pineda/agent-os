@@ -539,7 +539,7 @@ function sleep(ms: number): Promise<void> {
 
 function runCommand(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve, reject) => {
-    const child = execFile(command, args, (error) => {
+    execFile(command, args, (error) => {
       if (error) {
         if (error.code === 1) {
           resolve(false);
@@ -550,7 +550,6 @@ function runCommand(command: string, args: string[]): Promise<boolean> {
         resolve(true);
       }
     });
-    child.unref();
   });
 }
 
@@ -568,7 +567,6 @@ function runCommandForOutput(command: string, args: string[]): Promise<string> {
     child.stdout?.on('data', (data) => {
       stdout += String(data);
     });
-    child.unref();
   });
 }
 
