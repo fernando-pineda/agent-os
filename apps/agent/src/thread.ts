@@ -41,6 +41,8 @@ export interface UIMessage {
   content?: string | undefined;
   parts?: UIMessagePart[] | undefined;
   metadata?: Record<string, unknown> | undefined;
+  /** ISO timestamp set at persist time so loads can sort chronologically. */
+  createdAt?: string | undefined;
 }
 
 export function threadPath(homeDir: string): string {
@@ -80,7 +82,7 @@ export async function loadThread(homeDir: string): Promise<UIMessage[]> {
     const raw = await readFile(threadPath(homeDir), 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed)) {
-      return parsed as UIMessage[];
+      return sortThreadByCreatedAt(parsed as UIMessage[]);
     }
   } catch (err) {
     if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
@@ -89,6 +91,19 @@ export async function loadThread(homeDir: string): Promise<UIMessage[]> {
     console.warn('Failed to load thread', err);
   }
   return [];
+}
+
+// Stable sort by createdAt. Messages with a timestamp are ordered
+// chronologically; messages without one (older threads predating the
+// field) keep their relative array position so they are never shuffled
+// past each other.
+export function sortThreadByCreatedAt(messages: UIMessage[]): UIMessage[] {
+  return [...messages].sort((a, b) => {
+    const aTime = a.createdAt ? Date.parse(a.createdAt) : NaN;
+    const bTime = b.createdAt ? Date.parse(b.createdAt) : NaN;
+    if (Number.isNaN(aTime) || Number.isNaN(bTime)) return 0;
+    return aTime - bTime;
+  });
 }
 
 export async function saveThread(

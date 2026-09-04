@@ -28,6 +28,7 @@ import {
   loadUsage,
   saveThread,
   saveUsage,
+  sortThreadByCreatedAt,
   type UIMessage,
   uiMessagesToChat,
 } from './thread.js';
@@ -700,6 +701,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       const inbound: UIMessage = {
         id: crypto.randomUUID(),
         role: 'user',
+        createdAt: new Date().toISOString(),
         parts: [
           {
             type: 'text',
@@ -713,9 +715,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           ...(body.inReplyTo ? { reply: true } : {}),
         },
       };
-      await persistTurn([inbound], segments, serverDeps, {
-        replyToAgentId: body.fromAgentId,
-      });
+      await enqueuePersist(() =>
+        persistTurn([inbound], segments, serverDeps, {
+          replyToAgentId: body.fromAgentId,
+        }),
+      );
     } catch (err) {
       console.error('Inbox loop error', err);
     } finally {
@@ -938,7 +942,11 @@ async function persistTurn(
   const incoming = existingMessages
     .filter((m) => m.role !== 'assistant') // only persist user messages from client
     .filter((m) => !m.id || !storedIds.has(m.id))
-    .map((m) => (m.id ? m : { ...m, id: crypto.randomUUID() }));
+    .map((m) => ({
+      ...m,
+      ...(m.id ? {} : { id: crypto.randomUUID() }),
+      createdAt: m.createdAt ?? new Date().toISOString(),
+    }));
 
   // Stable per-turn id derived from the triggering user message, so
   // incremental and final persists of one turn share the same marker.
@@ -979,6 +987,7 @@ async function persistTurn(
     }
     current = undefined;
   };
+  const now = new Date().toISOString();
   for (const seg of segments) {
     if (seg.kind === 'text' && seg.text) {
       if (!current) {
@@ -986,6 +995,7 @@ async function persistTurn(
           id: crypto.randomUUID(),
           role: 'assistant',
           content: '',
+          createdAt: now,
           ...(assistantMetadata ? { metadata: assistantMetadata } : {}),
         };
       }
@@ -1004,6 +1014,7 @@ async function persistTurn(
         current = {
           id: crypto.randomUUID(),
           role: 'assistant',
+          createdAt: now,
           ...(assistantMetadata ? { metadata: assistantMetadata } : {}),
         };
       }
@@ -1029,8 +1040,9 @@ async function persistTurn(
     }
   }
   flush();
-  await saveThread(deps.homeDir, messages);
-  deps.onMessagesPersisted?.(messages);
+  const sorted = sortThreadByCreatedAt(messages);
+  await saveThread(deps.homeDir, sorted);
+  deps.onMessagesPersisted?.(sorted);
 }
 
 export async function sendAgentMessageHttp(
