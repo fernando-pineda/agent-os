@@ -12,6 +12,13 @@ export interface AgentAvatar {
   color: string;
 }
 
+export type ContainerStatus =
+  | 'none'
+  | 'pulling'
+  | 'starting'
+  | 'running'
+  | 'failed';
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -31,6 +38,7 @@ export interface AgentInfo {
   desktopPort?: number;
   sandboxType?: 'host' | 'docker-desktop';
   kasmImage?: string;
+  containerStatus?: ContainerStatus;
 }
 
 export interface OnboardingStatus {

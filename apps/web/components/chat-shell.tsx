@@ -1,6 +1,6 @@
 'use client';
 
-import { MenuIcon, PanelLeftCloseIcon } from 'lucide-react';
+import { Loader2Icon, MenuIcon, PanelLeftCloseIcon } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { useEffect, useState } from 'react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
@@ -47,6 +47,8 @@ export function ChatShell(): ReactElement {
     'desktopUrl' in agentContext && typeof agentContext.desktopUrl === 'string'
       ? agentContext.desktopUrl
       : undefined;
+
+  const containerStatus = selectedAgent?.containerStatus;
 
   useEffect((): void => {
     if (selectedAgentId === null || desktopPort === undefined) {
@@ -130,7 +132,24 @@ export function ChatShell(): ReactElement {
             </div>
           ) : (
             <RuntimeProvider key={selectedAgentId} agentId={selectedAgentId}>
-              {desktopPort === undefined ? (
+              {containerStatus === 'pulling' ||
+              containerStatus === 'starting' ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3">
+                  <Loader2Icon className="size-6 animate-spin text-zinc-500" />
+                  <p className="text-sm text-zinc-500">
+                    {containerStatus === 'pulling'
+                      ? 'Pulling Docker image, this may take a few minutes on first run...'
+                      : 'Starting container...'}
+                  </p>
+                </div>
+              ) : containerStatus === 'failed' ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3">
+                  <p className="text-sm text-red-400">
+                    Container failed to start. Check that Docker Desktop is
+                    running.
+                  </p>
+                </div>
+              ) : desktopPort === undefined ? (
                 <Thread />
               ) : (
                 <Tabs
