@@ -92,7 +92,15 @@ async function main(): Promise<void> {
     mcpConnections: initialMcpConnections,
     isBusy: () => serverRef.isBusy(),
     buildContext: (signal) =>
-      buildContext(agentId, workspace, homeDir, signal, agent, turnState),
+      buildContext(
+        agentId,
+        workspace,
+        homeDir,
+        signal,
+        agent,
+        turnState,
+        model,
+      ),
   });
 
   const server = createAgentServer({
@@ -110,7 +118,15 @@ async function main(): Promise<void> {
       _currentStatus = status;
     },
     buildContext: (signal) =>
-      buildContext(agentId, workspace, homeDir, signal, agent, turnState),
+      buildContext(
+        agentId,
+        workspace,
+        homeDir,
+        signal,
+        agent,
+        turnState,
+        model,
+      ),
     sendAgentMessage: (to, msg, opts) =>
       sendAgentMessageHttp(
         to,
@@ -242,6 +258,7 @@ async function createSession(
         signal,
         agent,
         turnState,
+        config.model,
       ),
     extensionFactories: [mcpExtension],
   };
@@ -402,6 +419,7 @@ function buildContext(
   signal: AbortSignal | undefined,
   agent: AgentConfig,
   turnState: { replyDepth: number; atCap: boolean },
+  model: string,
 ): ToolContext {
   const baseSend = (
     to: string,
@@ -420,6 +438,7 @@ function buildContext(
     agentId,
     workspace,
     homeDir,
+    model,
     signal,
     group: agent.group,
     env: buildEnv(agent),

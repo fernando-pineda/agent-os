@@ -177,7 +177,11 @@ export const agentCreate: Tool = {
         group: { type: 'string' },
         workspace: { type: 'string' },
         role: { type: 'string' },
-        model: { type: 'string' },
+        model: {
+          type: 'string',
+          description:
+            'Model for the new agent. Omit to inherit the calling agent model automatically.',
+        },
         plugins: {
           type: 'array',
           items: { type: 'string' },
@@ -208,7 +212,10 @@ export const agentCreate: Tool = {
     },
   },
 
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+  async execute(
+    args: Record<string, unknown>,
+    ctx?: ToolContext,
+  ): Promise<ToolResult> {
     const name = typeof args.name === 'string' ? args.name : '';
     const payload: Record<string, unknown> = {};
     if (name) payload.name = name;
@@ -217,8 +224,10 @@ export const agentCreate: Tool = {
     if (typeof args.workspace === 'string' && args.workspace)
       payload.workspace = args.workspace;
     if (typeof args.role === 'string' && args.role) payload.role = args.role;
+    // Inherit the calling agent model when omitted so parent and child match.
     if (typeof args.model === 'string' && args.model)
       payload.model = args.model;
+    else if (ctx?.model) payload.model = ctx.model;
     if (
       Array.isArray(args.plugins) &&
       args.plugins.every((p) => typeof p === 'string')

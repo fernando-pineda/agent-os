@@ -145,6 +145,8 @@ export interface ToolContext {
   agentId: string;
   workspace: string;
   homeDir: string;
+  /** Resolved model the calling agent runs on, so tools can inherit it. */
+  model?: string;
   group?: string | undefined;
   signal?: AbortSignal | undefined;
   env?: Record<string, string> | undefined;
