@@ -296,7 +296,7 @@ function MiniRunCard({
       type="button"
       onClick={onOpen}
       onKeyDown={onKeyDown}
-      className="flex w-full items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/90 px-3 py-2 text-left backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-zinc-900"
     >
       <span
         className={`size-2 shrink-0 rounded-full ${statusDotClass(run.status)}`}
@@ -553,22 +553,27 @@ export function SubagentPanel({
 
   return (
     <>
-      {/* Floating widget - top right, does not affect layout */}
-      <div className="fixed right-4 top-4 z-40 flex w-56 flex-col gap-1.5">
+      {/* Single floating card - top right */}
+      <div className="fixed right-4 top-4 z-40 w-56 rounded-lg border border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
+        <div className="border-b border-zinc-800 px-3 py-2">
+          <div className="text-xs font-medium text-zinc-300">Subagents</div>
+        </div>
         {streamError && (
-          <div className="rounded-md border border-red-900/50 bg-red-950/30 px-2.5 py-1.5 text-[0.65rem] text-red-300">
+          <div className="border-b border-red-900/50 bg-red-950/30 px-2.5 py-1.5 text-[0.65rem] text-red-300">
             {streamError}
           </div>
         )}
-        {runs.map((run) => (
-          <MiniRunCard
-            key={run.runId}
-            run={run}
-            stopping={stoppingRunId === run.runId}
-            onOpen={() => setSelectedRunId(run.runId)}
-            onStop={() => void onStop(run.runId)}
-          />
-        ))}
+        <div className="flex flex-col gap-px p-1.5">
+          {runs.map((run) => (
+            <MiniRunCard
+              key={run.runId}
+              run={run}
+              stopping={stoppingRunId === run.runId}
+              onOpen={() => setSelectedRunId(run.runId)}
+              onStop={() => void onStop(run.runId)}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Read-only detail dialog */}
