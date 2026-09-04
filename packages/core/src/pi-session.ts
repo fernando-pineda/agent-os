@@ -20,7 +20,12 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import { toolToPiDefinition } from './tool-adapter.js';
-import type { ChatMessage, Tool, ToolContext } from './types.js';
+import type {
+  ChatMessage,
+  SubagentConfig,
+  Tool,
+  ToolContext,
+} from './types.js';
 
 export interface PiSessionConfig {
   model: string;
@@ -296,6 +301,44 @@ async function resolveModel(
   );
 }
 
+function resolveSubagentModel(
+  modelRuntime: ModelRuntime,
+  modelId: string,
+): Model<Api> | undefined {
+  const slashIdx = modelId.indexOf('/');
+  if (slashIdx > 0) {
+    const providerId = modelId.slice(0, slashIdx);
+    const rawModelId = modelId.slice(slashIdx + 1);
+    const model = modelRuntime.getModel(providerId, rawModelId);
+    if (model) {
+      return model;
+    }
+    const modelLower = modelRuntime.getModel(
+      providerId,
+      rawModelId.toLowerCase(),
+    );
+    if (modelLower) {
+      return modelLower;
+    }
+  }
+
+  for (const provider of modelRuntime.getProviders()) {
+    const model = modelRuntime.getModel(provider.id, modelId);
+    if (model) {
+      return model;
+    }
+    const modelLower = modelRuntime.getModel(
+      provider.id,
+      modelId.toLowerCase(),
+    );
+    if (modelLower) {
+      return modelLower;
+    }
+  }
+
+  return undefined;
+}
+
 export async function createPiSession(
   config: PiSessionConfig,
 ): Promise<PiSessionHandle> {
@@ -372,5 +415,72 @@ export async function createPiSession(
       session.messages
         .map((message) => fromPiMessage(message))
         .filter((message): message is ChatMessage => message !== undefined),
+  };
+}
+
+export async function createSubagentSession(
+  config: SubagentConfig,
+  parentModelRuntime: ModelRuntime,
+  parentModel: Model<Api>,
+  allCustomTools: Tool[],
+  contextFactory: (signal?: AbortSignal) => ToolContext,
+): Promise<{
+  prompt: (task: string, signal?: AbortSignal) => Promise<string>;
+  dispose: () => void;
+}> {
+  const model = config.model
+    ? (resolveSubagentModel(parentModelRuntime, config.model) ?? parentModel)
+    : parentModel;
+  const customTools = allCustomTools.map((tool) =>
+    toolToPiDefinition(tool, contextFactory),
+  );
+  const settingsManager = SettingsManager.inMemory();
+  const cwd = process.cwd();
+  const resourceLoader = new DefaultResourceLoader({
+    cwd,
+    agentDir: join(process.env.HOME ?? cwd, '.pi', 'agent'),
+    settingsManager,
+    systemPromptOverride: () => config.systemPrompt,
+  });
+  await resourceLoader.reload();
+
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({
+    model,
+    modelRuntime: parentModelRuntime,
+    ...(config.tools !== undefined ? { tools: config.tools } : {}),
+    excludeTools: ['subagent_run'],
+    customTools,
+    resourceLoader,
+    sessionManager,
+    settingsManager,
+  });
+
+  return {
+    prompt: async (task, signal): Promise<string> => {
+      if (signal?.aborted) {
+        await session.abort();
+        return session.getLastAssistantText() ?? '(no response)';
+      }
+
+      let abortFailure: Error | undefined;
+      const abortHandler = (): void => {
+        void session.abort().catch((error) => {
+          abortFailure =
+            error instanceof Error ? error : new Error(String(error));
+        });
+      };
+      signal?.addEventListener('abort', abortHandler, { once: true });
+      try {
+        await session.prompt(task);
+      } finally {
+        signal?.removeEventListener('abort', abortHandler);
+      }
+      if (abortFailure) {
+        throw abortFailure;
+      }
+      return session.getLastAssistantText() ?? '(no response)';
+    },
+    dispose: (): void => session.dispose(),
   };
 }

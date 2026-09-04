@@ -6,10 +6,11 @@ import type {
   AgentStatus,
   PiSessionConfig,
   PiSessionHandle,
+  SubagentConfig,
   Tool,
   ToolContext,
 } from '@agent-os/core';
-import { createPiSession } from '@agent-os/core';
+import { createPiSession, createSubagentSession } from '@agent-os/core';
 import { customTools, TmuxSession } from '@agent-os/tools';
 import { createAutomationScheduler } from './automations.js';
 import { loadMemoryIndex, scheduleCompaction } from './compact.js';
@@ -455,7 +456,105 @@ function buildContext(
     sendAgentMessage: turnState.atCap
       ? () => Promise.resolve('Reply limit reached, message not sent.')
       : baseSend,
+    runSubagent: async (
+      name: string,
+      task: string,
+      subagentSignal?: AbortSignal,
+    ): Promise<string> => {
+      const currentSession = sessionHandle;
+      if (!currentSession) {
+        throw new Error('Agent session is not available');
+      }
+
+      const subagentConfig = await findSubagentConfig(name);
+      if (!subagentConfig) {
+        throw new Error(`Subagent not found: ${name}`);
+      }
+
+      const parentModel = currentSession.session.model;
+      if (!parentModel) {
+        throw new Error('Parent agent model is not available');
+      }
+
+      const child = await createSubagentSession(
+        subagentConfig,
+        currentSession.session.modelRuntime,
+        parentModel,
+        buildTools(agent.sandboxed ?? false, homeDir, workspace),
+        (childSignal?: AbortSignal): ToolContext =>
+          buildContext(
+            agentId,
+            workspace,
+            homeDir,
+            childSignal,
+            agent,
+            turnState,
+            model,
+          ),
+      );
+      try {
+        return await child.prompt(task, subagentSignal);
+      } finally {
+        child.dispose();
+      }
+    },
   };
+}
+
+function isSubagentConfig(value: object): value is SubagentConfig {
+  if (
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('description' in value) ||
+    typeof value.description !== 'string' ||
+    !('systemPrompt' in value) ||
+    typeof value.systemPrompt !== 'string'
+  ) {
+    return false;
+  }
+  if (
+    ('model' in value &&
+      value.model !== undefined &&
+      typeof value.model !== 'string') ||
+    ('tools' in value &&
+      value.tools !== undefined &&
+      (!Array.isArray(value.tools) ||
+        !value.tools.every((tool: string) => typeof tool === 'string')))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function findSubagentConfig(
+  name: string,
+): Promise<SubagentConfig | undefined> {
+  const response = await fetch('http://localhost:8787/api/subagents');
+  if (!response.ok) {
+    throw new Error(
+      `Failed to read subagent catalog: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const data: object | null = await response.json();
+  if (data === null) {
+    throw new Error('Invalid subagent catalog response');
+  }
+
+  const rawSubagents: object[] | undefined = Array.isArray(data)
+    ? data
+    : 'subagents' in data && Array.isArray(data.subagents)
+      ? data.subagents
+      : undefined;
+  if (!rawSubagents) {
+    throw new Error('Invalid subagent catalog response');
+  }
+
+  const subagents = rawSubagents.filter(isSubagentConfig);
+  if (subagents.length !== rawSubagents.length) {
+    throw new Error('Invalid subagent catalog response');
+  }
+  return subagents.find((subagent) => subagent.name === name);
 }
 
 function buildEnv(agent: AgentConfig): Record<string, string> {

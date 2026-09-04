@@ -9,6 +9,8 @@ export {
   type PiSessionConfig,
   type PiSessionHandle,
   createPiSession,
+  type createSubagentSession as CreateSubagentSessionFn,
+  createSubagentSession,
 } from './pi-session.js';
 export { toolToPiDefinition } from './tool-adapter.js';
 export * from './types.js';

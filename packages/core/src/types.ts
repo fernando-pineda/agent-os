@@ -2,6 +2,7 @@ export interface GlobalConfig {
   defaultModel?: string;
   createdAt: string;
   mcpServers?: McpServerConfig[];
+  subagents?: SubagentConfig[];
   reminders?: string[];
 }
 
@@ -13,6 +14,14 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+}
+
+export interface SubagentConfig {
+  name: string;
+  description: string;
+  model?: string;
+  tools?: string[];
+  systemPrompt: string;
 }
 
 export type McpStatus = 'online' | 'offline' | 'unknown';
@@ -154,6 +163,11 @@ export interface ToolContext {
     toAgentId: string,
     message: string,
     opts?: { replyDepth?: number; taskId?: string },
+  ) => Promise<string>;
+  runSubagent?: (
+    name: string,
+    task: string,
+    signal?: AbortSignal,
   ) => Promise<string>;
   /** Depth of the current agent-to-agent reply chain, for loop guards. */
   replyDepth?: number;

@@ -38,6 +38,13 @@ import {
   updateAgentConfig,
 } from './registry.js';
 import type { StatusTracker } from './status.js';
+import type { SubagentConfig } from './subagents.js';
+import {
+  createSubagent,
+  deleteSubagent,
+  listSubagents,
+  updateSubagent,
+} from './subagents.js';
 
 const port = Number(process.env.PORT ?? 8787);
 
@@ -233,6 +240,83 @@ async function handle(
     if (!removed) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Server not found' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (pathname === '/api/subagents' && req.method === 'GET') {
+    const subagents = await listSubagents();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ subagents }));
+    return;
+  }
+
+  if (pathname === '/api/subagents' && req.method === 'POST') {
+    const body = (await readJson(req)) as SubagentBody;
+    const validation = validateSubagent(body);
+    if (validation.error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: validation.error }));
+      return;
+    }
+    try {
+      const created = await createSubagent(validation.config);
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(created));
+    } catch (err) {
+      if (err instanceof Error && err.message === 'duplicate') {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'A subagent with that name already exists' }),
+        );
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+
+  const matchSubagent = /^\/api\/subagents\/([^/]+)$/.exec(pathname);
+  if (matchSubagent && req.method === 'PATCH') {
+    const name = decodeURIComponent(matchSubagent[1]!);
+    const body = (await readJson(req)) as SubagentBody;
+    const validation = validateSubagentPatch(body);
+    if (validation.error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: validation.error }));
+      return;
+    }
+    try {
+      const updated = await updateSubagent(name, validation.patch);
+      if (!updated) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Subagent not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(updated));
+    } catch (err) {
+      if (err instanceof Error && err.message === 'duplicate') {
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'A subagent with that name already exists' }),
+        );
+        return;
+      }
+      throw err;
+    }
+    return;
+  }
+
+  if (matchSubagent && req.method === 'DELETE') {
+    const name = decodeURIComponent(matchSubagent[1]!);
+    const removed = await deleteSubagent(name);
+    if (!removed) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Subagent not found' }));
       return;
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -894,6 +978,130 @@ function validateAvatar(value: unknown): AgentAvatar | null {
 interface McpValidation {
   server: McpServerConfig;
   error?: string;
+}
+
+interface SubagentValidation {
+  config: SubagentConfig;
+  error?: string;
+}
+
+interface SubagentPatchValidation {
+  patch: Partial<SubagentConfig>;
+  error?: string;
+}
+
+type SubagentField = string | string[] | number | boolean | null;
+type SubagentBody = Record<string, SubagentField>;
+
+const SUBAGENT_NAME_RE = /^[a-z0-9-]{1,64}$/;
+
+function validateSubagent(body: SubagentBody): SubagentValidation {
+  const name = body.name;
+  if (typeof name !== 'string' || name.trim() === '') {
+    return invalidSubagent('name is required');
+  }
+  const normalizedName = name.trim();
+  if (!SUBAGENT_NAME_RE.test(normalizedName)) {
+    return invalidSubagent(
+      'name must be 1-64 characters using lowercase letters, numbers, and hyphens',
+    );
+  }
+
+  const description = body.description;
+  if (typeof description !== 'string' || description.trim() === '') {
+    return invalidSubagent('description is required');
+  }
+  const systemPrompt = body.systemPrompt;
+  if (typeof systemPrompt !== 'string' || systemPrompt.trim() === '') {
+    return invalidSubagent('systemPrompt is required');
+  }
+
+  const config: SubagentConfig = {
+    name: normalizedName,
+    description,
+    systemPrompt,
+  };
+  if (body.model !== undefined) {
+    if (typeof body.model !== 'string') {
+      return invalidSubagent('model must be a string');
+    }
+    config.model = body.model;
+  }
+  if (body.tools !== undefined) {
+    const tools = parseStringArray(body.tools);
+    if (!tools) {
+      return invalidSubagent('tools must be an array of strings');
+    }
+    config.tools = tools;
+  }
+  return { config };
+}
+
+function validateSubagentPatch(body: SubagentBody): SubagentPatchValidation {
+  const patch: Partial<SubagentConfig> = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string' || body.name.trim() === '') {
+      return { patch, error: 'name is required' };
+    }
+    const name = body.name.trim();
+    if (!SUBAGENT_NAME_RE.test(name)) {
+      return {
+        patch,
+        error:
+          'name must be 1-64 characters using lowercase letters, numbers, and hyphens',
+      };
+    }
+    patch.name = name;
+  }
+  if (body.description !== undefined) {
+    if (
+      typeof body.description !== 'string' ||
+      body.description.trim() === ''
+    ) {
+      return { patch, error: 'description is required' };
+    }
+    patch.description = body.description;
+  }
+  if (body.systemPrompt !== undefined) {
+    if (
+      typeof body.systemPrompt !== 'string' ||
+      body.systemPrompt.trim() === ''
+    ) {
+      return { patch, error: 'systemPrompt is required' };
+    }
+    patch.systemPrompt = body.systemPrompt;
+  }
+  if (body.model !== undefined) {
+    if (typeof body.model !== 'string') {
+      return { patch, error: 'model must be a string' };
+    }
+    patch.model = body.model;
+  }
+  if (body.tools !== undefined) {
+    const tools = parseStringArray(body.tools);
+    if (!tools) {
+      return { patch, error: 'tools must be an array of strings' };
+    }
+    patch.tools = tools;
+  }
+  return { patch };
+}
+
+function invalidSubagent(error: string): SubagentValidation {
+  return {
+    config: { name: '', description: '', systemPrompt: '' },
+    error,
+  };
+}
+
+function parseStringArray(value: SubagentField): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const values: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') return null;
+    values.push(item);
+  }
+  return values;
 }
 
 function validateMcpServer(body: Record<string, unknown>): McpValidation {
