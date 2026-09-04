@@ -786,6 +786,8 @@ export function AgentsPanel() {
       setReminders([]);
       setCharacter(AGENT_CHARACTERS[0]);
       setColor(AGENT_AVATAR_DEFAULT_COLOR);
+      setSandboxType('host');
+      setKasmImage('kasmweb/ubuntu-jammy-desktop:1.19.0');
       setSelectedPlugins([]);
       setSelectedSubagents([]);
     } catch (err) {
@@ -950,6 +952,8 @@ export function AgentsPanel() {
     editName,
     editRole,
     editModel,
+    editSandboxType,
+    editKasmImage,
     editInstructions,
     editCharacter,
     editColor,
@@ -978,6 +982,8 @@ export function AgentsPanel() {
     editRole,
     editInstructions,
     editModel,
+    editSandboxType,
+    editKasmImage,
     editCharacter,
     editColor,
     selectedPlugins,
