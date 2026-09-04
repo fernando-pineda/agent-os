@@ -180,3 +180,107 @@ export const subagentRun: Tool = {
     }
   },
 };
+
+const subagentCreateSpec: ToolSpec = {
+  name: 'subagent_create',
+  description:
+    'Register a new shared subagent in the global catalog. ONLY use this tool when the user EXPLICITLY asks you to create a subagent. Never create subagents on your own initiative. The user must say something like "create a subagent that..." or "make a subagent for...". If the user did not explicitly request creation, refuse and explain that subagent creation requires their direct instruction.',
+  parameters: {
+    type: 'object',
+    properties: {
+      name: {
+        type: 'string',
+        description:
+          'Unique identifier for the subagent, 1-64 lowercase letters, numbers, or hyphens.',
+      },
+      description: {
+        type: 'string',
+        description:
+          'A clear description of what the subagent does, visible to all agents that can discover it.',
+      },
+      systemPrompt: {
+        type: 'string',
+        description:
+          'The system prompt that defines the subagent behavior, tools, and constraints.',
+      },
+      tools: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Optional allowlist of tool names the subagent can use (Pi built-ins: bash, read, edit, write, ls, grep, find; plus custom tools). If omitted, the subagent gets all available tools except subagent_run.',
+      },
+      model: {
+        type: 'string',
+        description:
+          'Optional model override for the subagent. If omitted, inherits the parent agent model.',
+      },
+    },
+    required: ['name', 'description', 'systemPrompt'],
+  },
+};
+
+export const subagentCreate: Tool = {
+  spec: subagentCreateSpec,
+
+  async execute(args: ToolArguments, _ctx: ToolContext): Promise<ToolResult> {
+    const name = typeof args.name === 'string' ? args.name.trim() : '';
+    const description =
+      typeof args.description === 'string' ? args.description.trim() : '';
+    const systemPrompt =
+      typeof args.systemPrompt === 'string' ? args.systemPrompt.trim() : '';
+
+    if (!name) {
+      return { ok: false, output: 'name is required', isError: true };
+    }
+    if (!/^[a-z0-9-]{1,64}$/.test(name)) {
+      return {
+        ok: false,
+        output: 'name must be 1-64 lowercase letters, numbers, or hyphens',
+        isError: true,
+      };
+    }
+    if (!description) {
+      return { ok: false, output: 'description is required', isError: true };
+    }
+    if (!systemPrompt) {
+      return { ok: false, output: 'systemPrompt is required', isError: true };
+    }
+
+    const payload: Record<string, unknown> = {
+      name,
+      description,
+      systemPrompt,
+    };
+    if (typeof args.model === 'string' && args.model.trim()) {
+      payload.model = args.model.trim();
+    }
+    if (
+      Array.isArray(args.tools) &&
+      args.tools.every((t) => typeof t === 'string')
+    ) {
+      payload.tools = args.tools;
+    }
+
+    try {
+      const response = await fetch(`${SUPERVISOR_BASE}/api/subagents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.text();
+      if (!response.ok) {
+        return {
+          ok: false,
+          output: `supervisor ${response.status}: ${body.slice(0, 300)}`,
+          isError: true,
+        };
+      }
+      return {
+        ok: true,
+        output: `Subagent "${name}" created successfully. It is now available to all agents via subagent_list and subagent_run.`,
+      };
+    } catch (error) {
+      return errorResult(error instanceof Error ? error : String(error));
+    }
+  },
+};

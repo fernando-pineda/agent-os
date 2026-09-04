@@ -449,7 +449,7 @@ export async function createSubagentSession(
     model,
     modelRuntime: parentModelRuntime,
     ...(config.tools !== undefined ? { tools: config.tools } : {}),
-    excludeTools: ['subagent_run'],
+    excludeTools: ['subagent_run', 'subagent_create'],
     customTools,
     resourceLoader,
     sessionManager,
