@@ -19,10 +19,13 @@ import type { AgentInfo, ModelItem } from '@/lib/types';
 
 export type AgentUsage = { inputTokens: number; outputTokens: number };
 
+type AgentContextAgent = AgentInfo & { desktopUrl?: string };
+
 type AgentContextValue = {
   selectedAgentId: string | null;
   setSelectedAgentId: (id: string | null) => void;
-  agents: AgentInfo[];
+  agents: AgentContextAgent[];
+  desktopUrl?: string;
   patchAgentStatus: (id: string, status: AgentInfo['status']) => void;
   // Live "thinking" preview per agent while streaming; cleared on finish.
   livePreview: Record<string, string>;
@@ -41,6 +44,7 @@ const AgentContext = createContext<AgentContextValue>({
   selectedAgentId: null,
   setSelectedAgentId: () => {},
   agents: [],
+  desktopUrl: undefined,
   patchAgentStatus: () => {},
   livePreview: {},
   setLivePreview: () => {},
@@ -55,7 +59,7 @@ const AgentContext = createContext<AgentContextValue>({
 
 export function AgentProvider({ children }: { children: ReactNode }) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [agents, setAgents] = useState<AgentContextAgent[]>([]);
   const [livePreview, setLive] = useState<Record<string, string>>({});
   const [usage, setUsageMap] = useState<Record<string, AgentUsage>>({});
   const [models, setModels] = useState<ModelItem[]>([]);
@@ -68,6 +72,24 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     getModels().then(setModels).catch(console.error);
   }, []);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
+
+  const addDesktopUrl = useCallback(
+    (agent: AgentInfo): AgentContextAgent =>
+      agent.desktopPort === undefined
+        ? agent
+        : {
+            ...agent,
+            desktopUrl: `https://localhost:${agent.desktopPort}`,
+          },
+    [],
+  );
+
+  const setAgentSnapshot = useCallback(
+    (snapshot: AgentInfo[]): void => {
+      setAgents(snapshot.map(addDesktopUrl));
+    },
+    [addDesktopUrl],
+  );
 
   const patchAgentStatus = useCallback(
     (id: string, status: AgentInfo['status']) => {
@@ -96,21 +118,22 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    getAgents().then(setAgents).catch(console.error);
+    getAgents().then(setAgentSnapshot).catch(console.error);
     getModels().then(setModels).catch(console.error);
     refreshGroups();
-    const unsubscribe = subscribeAgentEvents(
-      (snapshot) => setAgents(snapshot),
-      (error) => console.error(error),
+    const unsubscribe = subscribeAgentEvents(setAgentSnapshot, (error) =>
+      console.error(error),
     );
     return unsubscribe;
-  }, [refreshGroups]);
+  }, [refreshGroups, setAgentSnapshot]);
 
   const value = useMemo<AgentContextValue>(
     () => ({
       selectedAgentId,
       setSelectedAgentId: set,
       agents,
+      desktopUrl: agents.find((agent) => agent.id === selectedAgentId)
+        ?.desktopUrl,
       patchAgentStatus,
       livePreview,
       setLivePreview,

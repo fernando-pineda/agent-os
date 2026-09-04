@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   access,
   mkdir,
@@ -26,6 +27,8 @@ export const AGENTS_ROOT = join(homedir(), '.agent-os', 'agents');
 const REGISTRY_PATH = join(homedir(), '.agent-os', 'registry.json');
 // MCP plugins activated on every new agent unless the creator unchecks them.
 const DEFAULT_PLUGINS = ['open-computer-use'];
+const DEFAULT_KASM_IMAGE = 'kasmweb/ubuntu-jammy-desktop:1.19.0';
+const DOCKER_COMMAND_TIMEOUT_MS = 30_000;
 
 export interface RegistryEntry {
   id: string;
@@ -37,6 +40,9 @@ export interface RegistryEntry {
   // Set when the user explicitly requested this agent to stop. Prevents the
   // health poller from resurrecting a killed process as online.
   manualStop?: boolean | undefined;
+  vncPort?: number | undefined;
+  containerId?: string | undefined;
+  vncPassword?: string | undefined;
 }
 
 export interface Registry {
@@ -137,6 +143,8 @@ export interface CreateAgentInput {
   role?: string | undefined;
   model?: string | undefined;
   sandboxed?: boolean | undefined;
+  sandboxType?: AgentConfig['sandboxType'];
+  kasmImage?: string | undefined;
   avatar?: AgentAvatar | undefined;
   instructions?: string | undefined;
   plugins?: string[] | undefined;
@@ -155,6 +163,22 @@ export interface CreateAgentResult {
   error?: string | undefined;
 }
 
+export interface AgentConfigPatch {
+  name?: string | undefined;
+  group?: string | undefined;
+  role?: string | undefined;
+  model?: string | undefined;
+  workspace?: string | undefined;
+  sandboxed?: boolean | undefined;
+  sandboxType?: AgentConfig['sandboxType'];
+  kasmImage?: string | undefined;
+  avatar?: AgentAvatar | undefined;
+  instructions?: string | undefined;
+  plugins?: string[] | undefined;
+  subagents?: string[] | undefined;
+  reminders?: string[] | undefined;
+}
+
 export async function writeAgentConfig(config: AgentConfig): Promise<void> {
   await writeFile(
     join(AGENTS_ROOT, config.id, 'config.json'),
@@ -165,19 +189,7 @@ export async function writeAgentConfig(config: AgentConfig): Promise<void> {
 
 export async function updateAgentConfig(
   id: string,
-  patch: {
-    name?: string | undefined;
-    group?: string | undefined;
-    role?: string | undefined;
-    model?: string | undefined;
-    workspace?: string | undefined;
-    sandboxed?: boolean | undefined;
-    avatar?: AgentAvatar | undefined;
-    instructions?: string | undefined;
-    plugins?: string[] | undefined;
-    subagents?: string[] | undefined;
-    reminders?: string[] | undefined;
-  },
+  patch: AgentConfigPatch,
 ): Promise<AgentConfig | null> {
   const config = await readAgentConfig(id);
   if (!config) return null;
@@ -191,6 +203,8 @@ export async function updateAgentConfig(
     if (vision !== undefined) config.supportsVision = vision;
   }
   if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
+  if (patch.sandboxType !== undefined) config.sandboxType = patch.sandboxType;
+  if (patch.kasmImage !== undefined) config.kasmImage = patch.kasmImage;
   if (patch.avatar !== undefined) config.avatar = patch.avatar;
   if (patch.instructions !== undefined)
     config.instructions = patch.instructions;
@@ -213,7 +227,19 @@ export async function deleteAgent(
   registry: Registry,
   id: string,
 ): Promise<void> {
+  const config = await readAgentConfig(id);
   await stopAgent(registry, id);
+  if (config?.sandboxType !== 'docker-desktop') {
+    try {
+      await stopDockerContainer(id);
+    } catch (err) {
+      console.warn(
+        `stopDockerContainer(${id}) during delete failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   try {
     await uninstallLaunchdAgent(id);
@@ -277,6 +303,8 @@ export async function createAgent(
     if (vision !== undefined) config.supportsVision = vision;
   }
   if (input.sandboxed) config.sandboxed = input.sandboxed;
+  if (input.sandboxType !== undefined) config.sandboxType = input.sandboxType;
+  if (input.kasmImage !== undefined) config.kasmImage = input.kasmImage;
   if (input.avatar) config.avatar = input.avatar;
   if (input.instructions) config.instructions = input.instructions;
   // Apply default plugins only when they exist in the MCP catalog; otherwise
@@ -311,7 +339,7 @@ export async function createAgent(
   }
 
   return {
-    agent: toAgentInfo(config, entry.status, defaultModel),
+    agent: toAgentInfo(config, entry.status, defaultModel, entry),
   };
 }
 
@@ -329,9 +357,9 @@ export async function startAgent(
   await saveRegistry(registry);
   const spawnResult = await spawnAgentProcess(registry, id, workspace);
   if (spawnResult.error) {
-    return toAgentInfo(config, 'error', defaultModel);
+    return toAgentInfo(config, 'error', defaultModel, entry);
   }
-  return toAgentInfo(config, entry.status, defaultModel);
+  return toAgentInfo(config, entry.status, defaultModel, entry);
 }
 
 export async function stopAgent(
@@ -344,6 +372,21 @@ export async function stopAgent(
   const entry = await getOrCreateEntry(registry, id);
 
   await killAgentProcesses(entry, id);
+
+  if (config.sandboxType === 'docker-desktop') {
+    try {
+      await stopDockerContainer(id);
+    } catch (err) {
+      console.warn(
+        `stopDockerContainer(${id}) during stop failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    delete entry.containerId;
+    delete entry.vncPort;
+    delete entry.vncPassword;
+  }
 
   try {
     const hasSession = await runCommand('tmux', [
@@ -372,7 +415,7 @@ export async function stopAgent(
   entry.status = 'stopped';
   entry.manualStop = true;
   await saveRegistry(registry);
-  return toAgentInfo(config, 'stopped', defaultModel);
+  return toAgentInfo(config, 'stopped', defaultModel, entry);
 }
 
 // Resolve the agent dist main.js path so pgrep can match it. Mirrors the
@@ -555,11 +598,66 @@ function runCommandForOutput(command: string, args: string[]): Promise<string> {
   });
 }
 
+function runDockerCommand(
+  args: string[],
+  allowMissing: boolean,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'docker',
+      args,
+      { encoding: 'utf8', timeout: DOCKER_COMMAND_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        if (error) {
+          if (
+            allowMissing &&
+            error.code === 1 &&
+            /no such container/i.test(stderr)
+          ) {
+            resolve(stdout);
+            return;
+          }
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+function dockerContainerName(agentId: string): string {
+  return `agentos-${agentId.toLowerCase()}`;
+}
+
+async function removeDockerContainer(agentId: string): Promise<void> {
+  await runDockerCommand(['rm', '-f', dockerContainerName(agentId)], true);
+}
+
+async function stopDockerContainer(agentId: string): Promise<void> {
+  await runDockerCommand(['stop', dockerContainerName(agentId)], true);
+}
+
 export async function reconcileOnBoot(registry: Registry): Promise<void> {
   registry.agents = (await loadRegistry()).agents;
   for (const entry of registry.agents) {
     entry.status = 'stopped';
     entry.pid = 0;
+    const config = await readAgentConfig(entry.id);
+    if (config?.sandboxType === 'docker-desktop') {
+      try {
+        await removeDockerContainer(entry.id);
+      } catch (err) {
+        console.warn(
+          `removeDockerContainer(${entry.id}) during boot reconciliation failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      delete entry.containerId;
+      delete entry.vncPort;
+      delete entry.vncPassword;
+    }
   }
   await saveRegistry(registry);
   await reapOrphanAgents(registry);
@@ -701,11 +799,58 @@ async function allocatePort(registry: Registry): Promise<number> {
   return port;
 }
 
+async function allocateVncPort(registry: Registry): Promise<number> {
+  const base = 6901;
+  const used = new Set(registry.agents.map((a) => a.vncPort));
+  let port = base;
+  while (used.has(port) || !(await isPortFree(port))) {
+    port++;
+  }
+  return port;
+}
+
 export function getAgentPort(
   registry: Registry,
   id: string,
 ): number | undefined {
   return registry.agents.find((a) => a.id === id)?.port;
+}
+
+interface DockerSpawnResult {
+  containerId: string;
+  vncPort: number;
+  vncPassword: string;
+}
+
+async function spawnDockerContainer(
+  agentId: string,
+  vncPort: number,
+  kasmImage: string,
+): Promise<DockerSpawnResult> {
+  const containerName = dockerContainerName(agentId);
+  await removeDockerContainer(agentId);
+  const vncPassword = randomUUID().replaceAll('-', '').slice(0, 12);
+  const stdout = await runDockerCommand(
+    [
+      'run',
+      '-d',
+      '--rm',
+      '--shm-size=512m',
+      '-p',
+      `${vncPort}:6901`,
+      '-e',
+      `VNC_PW=${vncPassword}`,
+      '--name',
+      containerName,
+      kasmImage,
+    ],
+    false,
+  );
+  const containerId = stdout.trim().split(/\s+/)[0];
+  if (!containerId) {
+    throw new Error(`docker run returned no container id for ${agentId}`);
+  }
+  return { containerId, vncPort, vncPassword };
 }
 
 interface SpawnResult {
@@ -740,8 +885,22 @@ async function spawnAgentProcess(
   }
 
   const entry = await getOrCreateEntry(registry, id);
+  const config = await readAgentConfig(id);
+  if (!config) {
+    return { error: `Agent config not found for ${id}.` };
+  }
   const devHome = join(homedir(), '.agent-os', 'dev-homes', workspace);
   await mkdir(devHome, { recursive: true });
+
+  let dockerResult: DockerSpawnResult | undefined;
+  if (config.sandboxType === 'docker-desktop') {
+    const vncPort = await allocateVncPort(registry);
+    dockerResult = await spawnDockerContainer(
+      id,
+      vncPort,
+      config.kasmImage ?? DEFAULT_KASM_IMAGE,
+    );
+  }
 
   const spawnOptions: {
     env: NodeJS.ProcessEnv;
@@ -759,6 +918,9 @@ async function spawnAgentProcess(
     stdio: ['ignore', 0, 0],
     cwd: devHome,
   };
+  if (dockerResult) {
+    spawnOptions.env.AGENT_CONTAINER_NAME = dockerContainerName(id);
+  }
 
   const outFd = await open(logPath, 'a');
   const errFd = await open(logPath, 'a');
@@ -768,10 +930,25 @@ async function spawnAgentProcess(
 
   child.unref();
   if (child.pid) {
+    if (dockerResult) {
+      entry.containerId = dockerResult.containerId;
+      entry.vncPort = dockerResult.vncPort;
+      entry.vncPassword = dockerResult.vncPassword;
+    }
     entry.pid = child.pid;
     entry.status = 'starting';
     entry.lastSeen = new Date().toISOString();
     await saveRegistry(registry);
+  } else if (dockerResult) {
+    try {
+      await stopDockerContainer(id);
+    } catch (err) {
+      console.warn(
+        `stopDockerContainer(${id}) after process spawn failure failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
   await Promise.all([outFd.close(), errFd.close()]);
   return {};
@@ -781,6 +958,7 @@ export function toAgentInfo(
   config: AgentConfig,
   status: AgentStatus,
   defaultModel: string,
+  entry?: RegistryEntry,
 ): AgentInfo {
   const info: AgentInfo = {
     id: config.id,
@@ -810,6 +988,9 @@ export function toAgentInfo(
   }
   if (config.reminders) {
     info.reminders = config.reminders;
+  }
+  if (entry?.vncPort !== undefined) {
+    info.desktopPort = entry.vncPort;
   }
   return info;
 }

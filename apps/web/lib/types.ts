@@ -28,6 +28,7 @@ export interface AgentInfo {
   plugins?: string[];
   subagents?: string[];
   reminders?: string[];
+  desktopPort?: number;
 }
 
 export interface OnboardingStatus {

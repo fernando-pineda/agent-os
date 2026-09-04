@@ -1,24 +1,67 @@
 'use client';
 
 import { MenuIcon, PanelLeftCloseIcon } from 'lucide-react';
-import { useState } from 'react';
+import type { ReactElement } from 'react';
+import { useEffect, useState } from 'react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { AgentsPanel } from '@/components/agents-panel';
 import { Thread } from '@/components/assistant-ui/thread';
+import { DesktopView } from '@/components/desktop-view';
 import { SubagentPanel } from '@/components/subagent-panel';
 import { Button } from '@/components/ui/button';
+import {
+  Tabs,
+  TabsIndicator,
+  TabsList,
+  TabsPanel,
+  TabsTab,
+} from '@/components/ui/tabs';
 import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import { RuntimeProvider } from '@/lib/runtime';
+import type { AgentInfo } from '@/lib/types';
 
-export function ChatShell() {
-  const { selectedAgentId } = useAgentSelection();
+type ChatTab = 'chat' | 'desktop';
+
+type AgentWithDesktopPort = {
+  desktopPort: number;
+};
+
+function hasDesktopPort(
+  agent: AgentInfo,
+): agent is AgentInfo & AgentWithDesktopPort {
+  return 'desktopPort' in agent && typeof agent.desktopPort === 'number';
+}
+
+export function ChatShell(): ReactElement {
+  const agentContext = useAgentSelection();
+  const { selectedAgentId } = agentContext;
   const agents = useAgentsFeed();
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ChatTab>('chat');
+  const desktopPort =
+    selectedAgent !== undefined && hasDesktopPort(selectedAgent)
+      ? selectedAgent.desktopPort
+      : undefined;
+  const desktopUrl =
+    'desktopUrl' in agentContext && typeof agentContext.desktopUrl === 'string'
+      ? agentContext.desktopUrl
+      : undefined;
+
+  useEffect((): void => {
+    if (selectedAgentId === null || desktopPort === undefined) {
+      setActiveTab('chat');
+    }
+  }, [desktopPort, selectedAgentId]);
+
+  const handleTabChange = (value: string | null): void => {
+    if (value === 'chat' || value === 'desktop') {
+      setActiveTab(value);
+    }
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
-      {/* Mobile sidebar toggle */}
       <div className="absolute top-3 left-3 z-20 md:hidden">
         <Button
           variant="ghost"
@@ -30,7 +73,6 @@ export function ChatShell() {
         </Button>
       </div>
 
-      {/* Sidebar: agents only, one chat per agent */}
       <aside
         className={`fixed inset-y-0 left-0 z-30 w-[280px] flex-shrink-0 transform border-r border-zinc-800 bg-zinc-900 transition-transform md:static md:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -53,7 +95,6 @@ export function ChatShell() {
         </div>
       </aside>
 
-      {/* Overlay for mobile */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-20 bg-black/50 md:hidden"
@@ -61,7 +102,6 @@ export function ChatShell() {
         />
       )}
 
-      {/* Main thread area: keyed by agent so each agent has one chat */}
       <main className="flex flex-1 flex-col overflow-hidden md:ml-0">
         <div className="flex-1 overflow-hidden">
           {!selectedAgentId ? (
@@ -90,7 +130,33 @@ export function ChatShell() {
             </div>
           ) : (
             <RuntimeProvider key={selectedAgentId} agentId={selectedAgentId}>
-              <Thread />
+              {desktopPort === undefined ? (
+                <Thread />
+              ) : (
+                <Tabs
+                  value={activeTab}
+                  onValueChange={handleTabChange}
+                  className="flex h-full flex-col"
+                >
+                  <TabsList className="shrink-0 px-2">
+                    <TabsTab value="chat">Chat</TabsTab>
+                    <TabsTab value="desktop">Desktop</TabsTab>
+                    <TabsIndicator />
+                  </TabsList>
+                  <TabsPanel
+                    value="chat"
+                    className="min-h-0 flex-1 overflow-hidden"
+                  >
+                    <Thread />
+                  </TabsPanel>
+                  <TabsPanel
+                    value="desktop"
+                    className="min-h-0 flex-1 overflow-hidden"
+                  >
+                    <DesktopView desktopUrl={desktopUrl} port={desktopPort} />
+                  </TabsPanel>
+                </Tabs>
+              )}
             </RuntimeProvider>
           )}
         </div>

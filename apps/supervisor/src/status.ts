@@ -47,7 +47,7 @@ export class StatusTrackerImpl implements StatusTracker {
     for (const config of configs) {
       const entry = await getOrCreateEntry(this.registry, config.id);
       const status = await pollAgent(config, entry.port);
-      const info = toAgentInfo(config, status.status, this.defaultModel);
+      const info = toAgentInfo(config, status.status, this.defaultModel, entry);
       if (status.currentTaskId) {
         info.currentTaskId = status.currentTaskId;
       }
@@ -77,10 +77,14 @@ export class StatusTrackerImpl implements StatusTracker {
   refreshAgent(config: AgentConfig): void {
     const existing = this.info.get(config.id);
     const status = existing?.status ?? 'stopped';
+    const entry = this.registry.agents.find(
+      (candidate) => candidate.id === config.id,
+    );
     const info = toAgentInfo(
       config,
       status,
       existing?.model ?? this.defaultModel,
+      entry,
     );
     if (existing?.currentTaskId) {
       info.currentTaskId = existing.currentTaskId;
@@ -145,6 +149,7 @@ export class StatusTrackerImpl implements StatusTracker {
           config,
           health.status,
           existing?.model ?? this.defaultModel,
+          entry,
         );
         if (health.currentTaskId) {
           info.currentTaskId = health.currentTaskId;

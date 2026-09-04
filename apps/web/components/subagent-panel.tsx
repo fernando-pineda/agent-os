@@ -1,13 +1,21 @@
 'use client';
 
-import { SquareIcon, XIcon } from 'lucide-react';
+import { SquareIcon, XIcon, ChevronRightIcon } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useState,
 } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { getSubagentStreamUrl, stopSubagent } from '@/lib/api';
 import type {
@@ -260,7 +268,12 @@ function statusLabel(status: SubagentStatus): string {
   }
 }
 
-function RunCard({
+/**
+ * Minimal floating card for a single subagent run.
+ * Shows: status dot, name, truncated task, stop button (running only).
+ * Click opens the read-only detail dialog.
+ */
+function MiniRunCard({
   run,
   stopping,
   onOpen,
@@ -271,7 +284,7 @@ function RunCard({
   onOpen: () => void;
   onStop: () => void;
 }): ReactNode {
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpen();
@@ -279,59 +292,65 @@ function RunCard({
   };
 
   return (
-    <div
-      className="cursor-pointer rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2.5 transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+    <button
+      type="button"
       onClick={onOpen}
       onKeyDown={onKeyDown}
-      role="button"
-      tabIndex={0}
+      className="flex w-full items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/90 px-3 py-2 text-left backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-            <span
-              className={`size-2 shrink-0 rounded-full ${statusDotClass(run.status)}`}
-            />
-            <span className="truncate">{run.name}</span>
-          </div>
-          <div className="mt-1 truncate text-xs text-zinc-500">{run.task}</div>
+      <span
+        className={`size-2 shrink-0 rounded-full ${statusDotClass(run.status)}`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-medium text-zinc-100">
+          {run.name}
         </div>
-        {run.status === 'running' && (
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="shrink-0 text-red-400 hover:bg-red-950/50 hover:text-red-300"
-            onClick={(event) => {
+        <div className="truncate text-[0.65rem] text-zinc-500">{run.task}</div>
+      </div>
+      {run.status === 'running' ? (
+        <span
+          role="button"
+          tabIndex={0}
+          className="shrink-0 rounded p-1 text-red-400 transition-colors hover:bg-red-950/50"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStop();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
               event.stopPropagation();
+              event.preventDefault();
               onStop();
-            }}
-            disabled={stopping}
-            title="Stop subagent"
-            aria-label={`Stop ${run.name}`}
-          >
-            <SquareIcon />
-          </Button>
-        )}
-      </div>
-      <div className="mt-2 text-[0.7rem] text-zinc-600">
-        {statusLabel(run.status)}
-      </div>
-    </div>
+            }
+          }}
+          title="Stop subagent"
+          aria-label={`Stop ${run.name}`}
+        >
+          {stopping ? (
+            <span className="text-[0.6rem] text-zinc-500">...</span>
+          ) : (
+            <SquareIcon className="size-3" />
+          )}
+        </span>
+      ) : (
+        <ChevronRightIcon className="size-3 shrink-0 text-zinc-600" />
+      )}
+    </button>
   );
 }
 
-function ToolCallEvent({ event }: { event: SubagentStreamEvent }): ReactNode {
+function ToolCallView({ event }: { event: SubagentStreamEvent }): ReactNode {
   const args = formatArgs(event.args);
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
-      <div className="flex items-center justify-between gap-2 text-xs">
+    <div className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5">
+      <div className="flex items-center justify-between gap-2 text-[0.7rem]">
         <span className="truncate font-mono text-zinc-300">
-          {event.toolName ?? 'Tool call'}
+          {event.toolName ?? 'tool'}
         </span>
         <span className="shrink-0 text-amber-400">running...</span>
       </div>
       {args && (
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[0.7rem] text-zinc-500">
+        <pre className="mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[0.65rem] text-zinc-500">
           {args}
         </pre>
       )}
@@ -339,31 +358,31 @@ function ToolCallEvent({ event }: { event: SubagentStreamEvent }): ReactNode {
   );
 }
 
-function ToolResultEvent({ event }: { event: SubagentStreamEvent }): ReactNode {
+function ToolResultView({ event }: { event: SubagentStreamEvent }): ReactNode {
   return (
     <div
-      className={`rounded-lg border px-3 py-2 ${
+      className={`rounded-md border px-2.5 py-1.5 ${
         event.isError
           ? 'border-red-900/80 bg-red-950/30 text-red-200'
           : 'border-zinc-800 bg-zinc-950 text-zinc-300'
       }`}
     >
-      <div className="text-xs font-medium">
-        {event.isError ? 'Tool error' : 'Tool result'}
+      <div className="text-[0.7rem] font-medium">
+        {event.isError ? 'Error' : 'Result'}
       </div>
       {event.result && (
-        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-[0.7rem] leading-5">
+        <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words text-[0.65rem] leading-4">
           {event.result}
         </pre>
       )}
       {event.images && event.images.length > 0 && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-1.5 space-y-1.5">
           {event.images.map((image, index) => (
             <img
               key={`${event.toolCallId ?? 'image'}-${index}`}
               src={`data:${image.mimeType};base64,${image.data}`}
               alt="Tool output"
-              className="max-h-48 max-w-full rounded border border-zinc-800 object-contain"
+              className="max-h-36 max-w-full rounded border border-zinc-800 object-contain"
             />
           ))}
         </div>
@@ -372,31 +391,34 @@ function ToolResultEvent({ event }: { event: SubagentStreamEvent }): ReactNode {
   );
 }
 
-function EventEntry({ event }: { event: SubagentStreamEvent }): ReactNode {
+function EventRow({ event }: { event: SubagentStreamEvent }): ReactNode {
   switch (event.type) {
     case 'tool-call':
     case 'tool-start':
-      return <ToolCallEvent event={event} />;
+      return <ToolCallView event={event} />;
     case 'tool-args':
     case 'tool-call-end': {
       const args = formatArgs(event.args);
       if (!event.delta && !args) return null;
       return (
-        <pre className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 whitespace-pre-wrap break-words text-[0.7rem] text-zinc-500">
+        <pre className="rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 whitespace-pre-wrap break-words text-[0.65rem] text-zinc-500">
           {event.delta ?? args}
         </pre>
       );
     }
     case 'tool-end':
-      return <ToolResultEvent event={event} />;
+      return <ToolResultView event={event} />;
     case 'done':
     case 'settled':
-      return null;
     case 'text':
       return null;
   }
 }
 
+/**
+ * Read-only detail view shown inside a Dialog when a card is clicked.
+ * Uses the same dark theme and layout patterns as the main Thread.
+ */
 function ReadOnlyRunView({
   run,
   onClose,
@@ -408,24 +430,6 @@ function ReadOnlyRunView({
   const completed = run.status !== 'running';
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-          onClick={onClose}
-          title="Close subagent view"
-          aria-label="Close subagent view"
-        >
-          <XIcon />
-        </Button>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-100">
-            {run.name}
-          </div>
-          <div className="truncate text-xs text-zinc-500">{run.task}</div>
-        </div>
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="space-y-2">
           {entries.map((entry, index) =>
@@ -438,7 +442,7 @@ function ReadOnlyRunView({
               </div>
             ) : (
               <div key={`${entry.event.type}-${index}`}>
-                <EventEntry event={entry.event} />
+                <EventRow event={entry.event} />
               </div>
             ),
           )}
@@ -524,39 +528,80 @@ export function SubagentPanel({
     [agentId, stoppingRunId],
   );
 
+  // Auto-clear finished runs after 30s
+  useEffect(() => {
+    if (runs.length === 0) return;
+    const hasFinished = runs.some((r) => r.status !== 'running');
+    if (!hasFinished) return;
+    const timer = setTimeout(() => {
+      setRuns((current) =>
+        current.filter((r) => {
+          if (r.status === 'running') return true;
+          return Date.now() - r.startedAt < 60_000;
+        }),
+      );
+    }, 30_000);
+    return () => clearTimeout(timer);
+  }, [runs]);
+
+  const selectedRun = useMemo(
+    () => runs.find((run) => run.runId === selectedRunId) ?? null,
+    [runs, selectedRunId],
+  );
+
   if (runs.length === 0) return null;
 
-  const selectedRun = runs.find((run) => run.runId === selectedRunId);
   return (
-    <aside className="hidden h-full w-[320px] flex-shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-900 text-zinc-100 md:flex">
-      {selectedRun ? (
-        <ReadOnlyRunView
-          run={selectedRun}
-          onClose={() => setSelectedRunId(null)}
-        />
-      ) : (
-        <>
-          <div className="border-b border-zinc-800 px-3 py-2">
-            <div className="text-xs font-medium text-zinc-400">Subagents</div>
-            {streamError && (
-              <div className="mt-1 text-[0.7rem] text-red-400">
-                {streamError}
-              </div>
-            )}
+    <>
+      {/* Floating widget - top right, does not affect layout */}
+      <div className="fixed right-4 top-4 z-40 flex w-56 flex-col gap-1.5">
+        {streamError && (
+          <div className="rounded-md border border-red-900/50 bg-red-950/30 px-2.5 py-1.5 text-[0.65rem] text-red-300">
+            {streamError}
           </div>
-          <div className="flex-1 space-y-2 overflow-y-auto p-3">
-            {runs.map((run) => (
-              <RunCard
-                key={run.runId}
-                run={run}
-                stopping={stoppingRunId === run.runId}
-                onOpen={() => setSelectedRunId(run.runId)}
-                onStop={() => void onStop(run.runId)}
-              />
-            ))}
-          </div>
-        </>
-      )}
-    </aside>
+        )}
+        {runs.map((run) => (
+          <MiniRunCard
+            key={run.runId}
+            run={run}
+            stopping={stoppingRunId === run.runId}
+            onOpen={() => setSelectedRunId(run.runId)}
+            onStop={() => void onStop(run.runId)}
+          />
+        ))}
+      </div>
+
+      {/* Read-only detail dialog */}
+      <Dialog
+        open={selectedRun !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedRunId(null);
+        }}
+      >
+        <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {selectedRun && (
+                <>
+                  <span
+                    className={`size-2.5 rounded-full ${statusDotClass(selectedRun.status)}`}
+                  />
+                  {selectedRun.name}
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              {selectedRun?.task}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedRun && (
+            <ReadOnlyRunView
+              run={selectedRun}
+              onClose={() => setSelectedRunId(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -50,6 +50,9 @@ export interface AgentConfig {
     sshKeyPath?: string;
   };
   sandboxed?: boolean;
+  /** Selects the execution environment. Legacy sandboxed:true maps to host. */
+  sandboxType?: 'host' | 'docker-desktop';
+  kasmImage?: string;
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
@@ -82,6 +85,7 @@ export interface AgentInfo {
   plugins?: string[];
   subagents?: string[];
   reminders?: string[];
+  desktopPort?: number;
 }
 
 export interface ToolSpec {

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import type {
   SubagentConfig,
   Tool,
   ToolContext,
+  ToolResult,
 } from '@agent-os/core';
 import { createPiSession, createSubagentSession } from '@agent-os/core';
 import { customTools, TmuxSession } from '@agent-os/tools';
@@ -46,6 +48,8 @@ if (!rawAgentId || typeof rawAgentId !== 'string') {
   process.exit(1);
 }
 const agentId = rawAgentId;
+const containerName = process.env.AGENT_CONTAINER_NAME;
+const DOCKER_EXEC_TIMEOUT_MS = 120_000;
 
 let _currentStatus: AgentStatus = 'starting';
 let mcpConnections: McpConnection[] = [];
@@ -75,15 +79,22 @@ async function main(): Promise<void> {
     `Agent ${agentId} workspace ${workspace} home ${homeDir} model ${model} port ${resolvedPort}`,
   );
 
-  try {
-    await TmuxSession.create(`agent-os-${agentId}`, homeDir);
-  } catch (err) {
-    console.warn(
-      `Tmux session not created: ${err instanceof Error ? err.message : String(err)}. Continuing in-process.`,
-    );
+  if (!containerName) {
+    try {
+      await TmuxSession.create(`agent-os-${agentId}`, homeDir);
+    } catch (err) {
+      console.warn(
+        `Tmux session not created: ${err instanceof Error ? err.message : String(err)}. Continuing in-process.`,
+      );
+    }
   }
 
-  const tools = buildTools(agent.sandboxed ?? false, homeDir, workspace);
+  const tools = buildTools(
+    agent.sandboxed ?? false,
+    homeDir,
+    workspace,
+    containerName,
+  );
 
   const initialMcpConnections = await rebuildAutomationMcp(
     config.mcpServers ?? [],
@@ -94,6 +105,7 @@ async function main(): Promise<void> {
     configSnapshot,
     tools,
     homeDir,
+    containerName,
   );
   sessionHandle = initialSessionHandle;
 
@@ -152,7 +164,12 @@ async function main(): Promise<void> {
         fresh.config.mcpServers ?? [],
         fresh.agent.plugins ?? [],
       );
-      const nextSession = await createSession(fresh, tools, homeDir);
+      const nextSession = await createSession(
+        fresh,
+        tools,
+        homeDir,
+        containerName,
+      );
       const previousSession = sessionHandle;
       const previousConnections = mcpConnections;
       sessionHandle = nextSession;
@@ -226,6 +243,7 @@ async function createSession(
   config: Awaited<ReturnType<typeof loadAgentConfig>>,
   tools: Tool[],
   homeDir: string,
+  containerName?: string,
 ): Promise<PiSessionHandle> {
   const thread = await loadThread(homeDir);
   const memoryIndex = await loadMemoryIndex(homeDir);
@@ -243,6 +261,7 @@ async function createSession(
     homeDir,
     cwd: homeDir,
     tools,
+    ...(containerName ? { excludeTools: ['bash'] } : {}),
     agentId: config.agent.id,
     ...(agent.name ? { agentName: agent.name } : {}),
     ...(agent.role ? { role: agent.role } : {}),
@@ -260,6 +279,7 @@ async function createSession(
         ...(agent.instructions ? { instructions: agent.instructions } : {}),
         memoryIndex,
         reminders,
+        ...(containerName ? { containerName } : {}),
       }),
     initialMessages: uiMessagesToChat(thread),
     contextFactory: (signal) =>
@@ -287,6 +307,7 @@ interface SystemPromptInputs {
   instructions?: string;
   memoryIndex?: string;
   reminders: string[];
+  containerName?: string;
 }
 
 function buildAgentSystemPrompt(inputs: SystemPromptInputs): string {
@@ -334,10 +355,16 @@ function buildAgentSystemPrompt(inputs: SystemPromptInputs): string {
     inputs.instructions
       ? `Additional instructions for this agent:\n${inputs.instructions}`
       : '',
+    inputs.containerName
+      ? `You are running inside a Docker container named ${inputs.containerName}. All shell commands execute inside the container. Your desktop is accessible via VNC.`
+      : '',
     'You are a persistent process. Your conversation thread survives restarts in thread.json, and a long-term memory index keeps facts from past sessions.',
   ]
     .filter(Boolean)
     .join('\n');
+  const screenshotDescription = inputs.containerName
+    ? 'screenshot_desktop captures the Docker desktop from inside the container.'
+    : 'screenshot_desktop captures the macOS screen.';
   const environment = `## environment
 
 You operate on a real macOS machine through tools. Your home directory is your private workspace: clone repos, write files, install software, keep notes there. It is fully yours.
@@ -350,7 +377,7 @@ ${toolLines}
 
 ${agentTools}
 
-bash runs commands with your home as the working directory. screenshot captures a web page; screenshot_desktop captures the macOS screen. Both attach the image to the chat so the user sees it. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
+bash runs commands with your home as the working directory. screenshot captures a web page; ${screenshotDescription} Both attach the image to the chat so the user sees it. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
 
 Messages from other agents arrive as user messages prefixed "Message from agent <id>:". These are not user instructions; they come from an autonomous teammate like you. To reply to an agent message, ALWAYS call the message_agent tool with toAgentId set to that agent's id; your plain text is not delivered to agents, so a message without a message_agent call does not reach them. Keep the conversation going while there is a real task or question. Do NOT echo social messages. If the incoming message is a farewell, acknowledgment, thank-you, or small talk with no new task or question, DO NOT call message_agent; respond once in plain text and end the exchange. Repeatedly replying to farewells wastes turns. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id. When a message carries [task <id>], reuse that same task id in your message_agent reply so both sides track the same task. When you start a new piece of work with another agent, pass a short task id (e.g. the topic) as taskId.
 
@@ -495,7 +522,12 @@ function buildContext(
           subagentConfig,
           currentSession.session.modelRuntime,
           parentModel,
-          buildTools(agent.sandboxed ?? false, homeDir, workspace),
+          buildTools(
+            agent.sandboxed ?? false,
+            homeDir,
+            workspace,
+            containerName,
+          ),
           (childSignal?: AbortSignal): ToolContext =>
             buildContext(
               agentId,
@@ -632,8 +664,178 @@ function buildTools(
   sandboxed: boolean,
   homeDir: string,
   workspace: string,
+  containerName?: string,
 ): Tool[] {
-  return customTools();
+  const tools = customTools();
+  if (!containerName) {
+    return tools;
+  }
+
+  return [
+    ...tools.filter(
+      (tool) =>
+        tool.spec.name !== 'bash' && tool.spec.name !== 'screenshot_desktop',
+    ),
+    createContainerBashTool(containerName),
+    createContainerScreenshotTool(containerName),
+  ];
+}
+
+interface ContainerCommandResult {
+  error: Error | null;
+  stdout: string;
+  stderr: string;
+}
+
+interface ContainerBinaryResult {
+  error: Error | null;
+  stdout: Buffer;
+  stderr: string;
+}
+
+function runContainerCommand(args: string[]): Promise<ContainerCommandResult> {
+  return new Promise((resolve) => {
+    execFile(
+      'docker',
+      args,
+      { timeout: DOCKER_EXEC_TIMEOUT_MS },
+      (error, stdout, stderr) => {
+        resolve({
+          error,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
+        });
+      },
+    );
+  });
+}
+
+function runContainerBinaryCommand(
+  args: string[],
+): Promise<ContainerBinaryResult> {
+  return new Promise((resolve) => {
+    execFile(
+      'docker',
+      args,
+      { timeout: DOCKER_EXEC_TIMEOUT_MS, encoding: 'buffer' },
+      (error, stdout, stderr) => {
+        resolve({
+          error,
+          stdout: Buffer.from(stdout),
+          stderr: stderr.toString(),
+        });
+      },
+    );
+  });
+}
+
+function combineCommandOutput(stdout: string, stderr: string): string {
+  if (stdout.length === 0) {
+    return stderr;
+  }
+  if (stderr.length === 0) {
+    return stdout;
+  }
+  return `${stdout}\n${stderr}`;
+}
+
+function createContainerBashTool(containerName: string): Tool {
+  return {
+    spec: {
+      name: 'bash',
+      description: 'Run a shell command inside the Docker container',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string' },
+        },
+        required: ['command'],
+      },
+    },
+    async execute(
+      args: Record<string, unknown>,
+      _ctx: ToolContext,
+    ): Promise<ToolResult> {
+      const command = typeof args.command === 'string' ? args.command : '';
+      const result = await runContainerCommand([
+        'exec',
+        containerName,
+        'bash',
+        '-c',
+        command,
+      ]);
+      const output = combineCommandOutput(result.stdout, result.stderr);
+      return {
+        ok: result.error === null,
+        output: output || result.error?.message || '',
+      };
+    },
+  };
+}
+
+function createContainerScreenshotTool(containerName: string): Tool {
+  return {
+    spec: {
+      name: 'screenshot_desktop',
+      description:
+        'Capture the Docker desktop to a PNG and attach it to the chat.',
+      parameters: {
+        type: 'object',
+        properties: {
+          outputPath: { type: 'string' },
+          display: { type: 'number' },
+        },
+      },
+    },
+    async execute(
+      args: Record<string, unknown>,
+      ctx: ToolContext,
+    ): Promise<ToolResult> {
+      const outputPath =
+        typeof args.outputPath === 'string'
+          ? join(ctx.homeDir, args.outputPath)
+          : join(ctx.homeDir, 'desktop_screenshot.png');
+      const capture = await runContainerCommand([
+        'exec',
+        containerName,
+        'scrot',
+        '/tmp/shot.png',
+      ]);
+      const captureOutput = combineCommandOutput(
+        capture.stdout,
+        capture.stderr,
+      );
+      if (capture.error !== null) {
+        return {
+          ok: false,
+          output: captureOutput || capture.error.message,
+        };
+      }
+
+      const copied = await runContainerBinaryCommand([
+        'cp',
+        `${containerName}:/tmp/shot.png`,
+        '-',
+      ]);
+      if (copied.error !== null) {
+        return {
+          ok: false,
+          output: copied.stderr || copied.error.message,
+        };
+      }
+
+      return {
+        ok: true,
+        output: outputPath,
+        images: [
+          {
+            data: copied.stdout.toString('base64'),
+            mimeType: 'image/png',
+          },
+        ],
+      };
+    },
+  };
 }
 
 async function provisionGit(

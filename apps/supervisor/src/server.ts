@@ -26,7 +26,11 @@ import {
   readGlobalConfig,
   updateGlobalConfig,
 } from './onboarding.js';
-import type { CreateAgentInput, Registry } from './registry.js';
+import type {
+  AgentConfigPatch,
+  CreateAgentInput,
+  Registry,
+} from './registry.js';
 import {
   createAgent,
   deleteAgent,
@@ -45,11 +49,6 @@ import {
   listSubagents,
   updateSubagent,
 } from './subagents.js';
-
-type AgentCreationInput = CreateAgentInput & { subagents?: string[] };
-type AgentConfigPatch = Parameters<typeof updateAgentConfig>[1] & {
-  subagents?: string[];
-};
 
 const port = Number(process.env.PORT ?? 8787);
 
@@ -386,12 +385,16 @@ async function handle(
   if (pathname === '/api/agents' && req.method === 'POST') {
     const raw = await readJson(req);
     const body = raw as Record<string, unknown>;
-    const input: AgentCreationInput = { name: String(body.name ?? '') };
+    const input: CreateAgentInput = { name: String(body.name ?? '') };
     if (typeof body.group === 'string') input.group = body.group;
     if (typeof body.workspace === 'string') input.workspace = body.workspace;
     if (typeof body.role === 'string') input.role = body.role;
     if (typeof body.model === 'string') input.model = body.model;
     if (typeof body.sandboxed === 'boolean') input.sandboxed = body.sandboxed;
+    if (body.sandboxType === 'host' || body.sandboxType === 'docker-desktop') {
+      input.sandboxType = body.sandboxType;
+    }
+    if (typeof body.kasmImage === 'string') input.kasmImage = body.kasmImage;
     if (typeof body.instructions === 'string')
       input.instructions = body.instructions;
     if (body.avatar !== undefined) {
@@ -470,6 +473,10 @@ async function handle(
     if (typeof body.model === 'string') patch.model = body.model;
     if (typeof body.workspace === 'string') patch.workspace = body.workspace;
     if (typeof body.sandboxed === 'boolean') patch.sandboxed = body.sandboxed;
+    if (body.sandboxType === 'host' || body.sandboxType === 'docker-desktop') {
+      patch.sandboxType = body.sandboxType;
+    }
+    if (typeof body.kasmImage === 'string') patch.kasmImage = body.kasmImage;
     if (body.avatar !== undefined) {
       const avatar = validateAvatar(body.avatar);
       if (avatar) patch.avatar = avatar;
@@ -609,6 +616,27 @@ async function handle(
       clearInterval(heartbeat);
       unsubscribe();
     });
+    return;
+  }
+
+  const matchAgentDesktop = /^\/api\/agents\/([^/]+)\/desktop$/.exec(pathname);
+  if (matchAgentDesktop && req.method === 'GET') {
+    const id = decodeURIComponent(matchAgentDesktop[1]!);
+    const entry = registry.agents.find((agent) => agent.id === id);
+    if (!entry || entry.vncPort === undefined) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No desktop for this agent' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        url: `https://localhost:${entry.vncPort}`,
+        port: entry.vncPort,
+        status: entry.status === 'stopped' ? 'stopped' : 'running',
+        password: entry.vncPassword,
+      }),
+    );
     return;
   }
 

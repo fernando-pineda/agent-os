@@ -32,6 +32,7 @@ export interface PiSessionConfig {
   homeDir: string;
   cwd: string;
   tools: Tool[];
+  excludeTools?: string[];
   agentId: string;
   agentName?: string;
   role?: string;
@@ -370,6 +371,9 @@ export async function createPiSession(
   const { session } = await createAgentSession({
     model,
     modelRuntime,
+    ...(config.excludeTools !== undefined
+      ? { excludeTools: config.excludeTools }
+      : {}),
     customTools,
     resourceLoader,
     sessionManager,
