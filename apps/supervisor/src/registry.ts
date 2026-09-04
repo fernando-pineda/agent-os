@@ -228,8 +228,12 @@ export async function deleteAgent(
   id: string,
 ): Promise<void> {
   const config = await readAgentConfig(id);
+  const entry = registry.agents.find((candidate) => candidate.id === id);
   await stopAgent(registry, id);
-  if (config?.sandboxType !== 'docker-desktop') {
+  if (
+    config?.sandboxType !== 'docker-desktop' &&
+    entry?.containerId !== undefined
+  ) {
     try {
       await stopDockerContainer(id);
     } catch (err) {
