@@ -69,6 +69,13 @@ export type AgentStatus =
   | 'error'
   | 'stopped';
 
+export type ContainerStatus =
+  | 'none'
+  | 'pulling'
+  | 'starting'
+  | 'running'
+  | 'failed';
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -86,6 +93,7 @@ export interface AgentInfo {
   subagents?: string[];
   reminders?: string[];
   desktopPort?: number;
+  containerStatus?: ContainerStatus;
 }
 
 export interface ToolSpec {

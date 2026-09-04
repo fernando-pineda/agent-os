@@ -642,8 +642,8 @@ export function SubagentPanel({
         swipeDirection="right"
       >
         <DrawerContent className="max-w-md">
-          <DrawerHeader className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <DrawerHeader className="flex-row items-center justify-between gap-2">
+            <div className="flex flex-row items-center gap-2">
               {selectedRun && (
                 <>
                   <span

@@ -18,6 +18,7 @@ import type {
   AgentConfig,
   AgentInfo,
   AgentStatus,
+  ContainerStatus,
 } from '@agent-os/core';
 import { uninstallLaunchdAgent } from './launchd.js';
 import { listMcpServers } from './mcps.js';
@@ -44,6 +45,7 @@ export interface RegistryEntry {
   vncPort?: number | undefined;
   containerId?: string | undefined;
   vncPassword?: string | undefined;
+  containerStatus?: ContainerStatus | undefined;
 }
 
 export interface Registry {
@@ -336,12 +338,16 @@ export async function createAgent(
   const entry = await getOrCreateEntry(registry, id);
   entry.status = 'starting';
   entry.pid = 0;
+  if (config.sandboxType === 'docker-desktop') {
+    entry.containerStatus = 'pulling';
+  }
   await saveRegistry(registry);
 
-  const spawnResult = await spawnAgentProcess(registry, id, workspace);
-  if (spawnResult.error) {
-    return { error: spawnResult.error };
-  }
+  // Fire-and-forget: spawn runs in the background so the HTTP response
+  // returns instantly. Container status updates flow through the registry.
+  void spawnAgentProcess(registry, id, workspace).catch((err) => {
+    console.error(`Background spawn failed for ${id}:`, err);
+  });
 
   return {
     agent: toAgentInfo(config, entry.status, defaultModel, entry),
@@ -359,11 +365,14 @@ export async function startAgent(
   const entry = await getOrCreateEntry(registry, id);
   entry.status = 'starting';
   entry.manualStop = false;
-  await saveRegistry(registry);
-  const spawnResult = await spawnAgentProcess(registry, id, workspace);
-  if (spawnResult.error) {
-    return toAgentInfo(config, 'error', defaultModel, entry);
+  if (config.sandboxType === 'docker-desktop') {
+    entry.containerStatus = 'pulling';
   }
+  await saveRegistry(registry);
+  // Fire-and-forget so start returns instantly.
+  void spawnAgentProcess(registry, id, workspace).catch((err) => {
+    console.error(`Background spawn failed for ${id}:`, err);
+  });
   return toAgentInfo(config, entry.status, defaultModel, entry);
 }
 
@@ -391,6 +400,7 @@ export async function stopAgent(
     delete entry.containerId;
     delete entry.vncPort;
     delete entry.vncPassword;
+    entry.containerStatus = 'none';
   }
 
   try {
@@ -674,6 +684,7 @@ export async function reconcileOnBoot(registry: Registry): Promise<void> {
       delete entry.containerId;
       delete entry.vncPort;
       delete entry.vncPassword;
+      entry.containerStatus = 'none';
     }
   }
   await saveRegistry(registry);
@@ -936,19 +947,26 @@ async function spawnAgentProcess(
       // Pre-flight: fail fast if Docker daemon is not running instead of
       // hanging on docker run for 30s.
       await runDockerCommand(['info', '--format', '{{.ServerVersion}}'], false);
+      entry.containerStatus = 'pulling';
+      await saveRegistry(registry);
       const vncPort = await allocateVncPort(registry);
+      entry.containerStatus = 'starting';
+      await saveRegistry(registry);
       dockerResult = await spawnDockerContainer(
         id,
         vncPort,
         config.kasmImage ?? DEFAULT_KASM_IMAGE,
       );
+      entry.containerStatus = 'running';
     } catch (err) {
+      entry.containerStatus = 'failed';
       console.error(
         `Docker container spawn failed for ${id}, agent will run on host without a container:`,
         err instanceof Error ? err.message : String(err),
       );
       // Continue without a container; the agent process starts on the host.
     }
+    await saveRegistry(registry);
   }
 
   const spawnOptions: {
@@ -1040,6 +1058,9 @@ export function toAgentInfo(
   }
   if (entry?.vncPort !== undefined) {
     info.desktopPort = entry.vncPort;
+  }
+  if (entry?.containerStatus !== undefined) {
+    info.containerStatus = entry.containerStatus;
   }
   return info;
 }
