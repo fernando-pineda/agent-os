@@ -98,7 +98,6 @@ export async function getAgents(): Promise<AgentInfo[]> {
 export async function createAgent(
   payload: CreateAgentPayload,
 ): Promise<AgentInfo> {
-  // 60s timeout: docker pull or container spawn can take time on first run.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60_000);
   try {

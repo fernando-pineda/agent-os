@@ -73,17 +73,12 @@ export class StatusTrackerImpl implements StatusTracker {
     return this.info.get(id);
   }
 
-  // Rebuild one agent from its config (PATCH path), keep live status.
   async refreshAgent(config: AgentConfig): Promise<void> {
     const existing = this.info.get(config.id);
-    // Reload registry from disk so vncPort/containerId changes from
-    // start/stop are reflected, not just the tracker's stale copy.
     this.registry = await loadRegistry();
     const entry = this.registry.agents.find(
       (candidate) => candidate.id === config.id,
     );
-    // Use the entry's status if we have it (e.g. 'starting' for a new
-    // agent), not a hard-coded 'stopped' that hides the container spinner.
     const status = existing?.status ?? entry?.status ?? 'stopped';
     const info = toAgentInfo(
       config,
@@ -133,16 +128,11 @@ export class StatusTrackerImpl implements StatusTracker {
 
   private async tick(): Promise<void> {
     if (this.stopped) return;
-    // Reload registry from disk so spawn/stop changes to vncPort and
-    // containerId are visible, not just the tracker's in-memory copy.
     this.registry = await loadRegistry();
     const configs = await listAgentConfigs();
     let changed = false;
     for (const config of configs) {
       const entry = await getOrCreateEntry(this.registry, config.id);
-      // Don't skip agents that have an active container operation
-      // (pulling/starting); their status must flow to the UI even
-      // though the agent process isn't up yet.
       const hasActiveContainer =
         entry.containerStatus === 'pulling' ||
         entry.containerStatus === 'starting';
@@ -152,10 +142,6 @@ export class StatusTrackerImpl implements StatusTracker {
       const health = await pollAgent(config, entry.port);
       const existing = this.info.get(config.id);
       const currentStatus = existing?.status ?? 'stopped';
-      // When the container is pulling/starting, the agent process may
-      // not be up yet. Use the registry entry's status ('starting')
-      // instead of the health poll ('stopped') so the UI shows the
-      // container spinner, not "turned off".
       const effectiveStatus = hasActiveContainer ? entry.status : health.status;
       if (
         currentStatus !== effectiveStatus ||

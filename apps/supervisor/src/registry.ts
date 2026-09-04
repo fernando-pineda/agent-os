@@ -343,8 +343,6 @@ export async function createAgent(
   }
   await saveRegistry(registry);
 
-  // Fire-and-forget: spawn runs in the background so the HTTP response
-  // returns instantly. Container status updates flow through the registry.
   void spawnAgentProcess(registry, id, workspace).catch((err) => {
     console.error(`Background spawn failed for ${id}:`, err);
   });
@@ -369,7 +367,6 @@ export async function startAgent(
     entry.containerStatus = 'pulling';
   }
   await saveRegistry(registry);
-  // Fire-and-forget so start returns instantly.
   void spawnAgentProcess(registry, id, workspace).catch((err) => {
     console.error(`Background spawn failed for ${id}:`, err);
   });
@@ -858,8 +855,6 @@ async function spawnDockerContainer(
   const containerName = dockerContainerName(agentId);
   await removeDockerContainer(agentId);
   const vncPassword = randomUUID().replaceAll('-', '').slice(0, 12);
-  // Pull the image first with a longer timeout, so docker run starts
-  // instantly with the image already local instead of blocking on pull.
   try {
     await runDockerCommandWithTimeout(
       ['pull', kasmImage],
@@ -867,17 +862,13 @@ async function spawnDockerContainer(
       DOCKER_PULL_TIMEOUT_MS,
     );
   } catch (err) {
-    // If pull fails because image is already local, continue. If it fails
-    // for other reasons, docker run will surface the real error.
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/manifest unknown|not found/i.test(msg)) {
-      // Image might already be local, or pull timed out. Try running anyway.
-      console.warn(
-        `docker pull ${kasmImage} failed, trying run directly: ${msg}`,
-      );
-    } else {
+    if (/manifest unknown|not found/i.test(msg)) {
       throw new Error(`Kasm image ${kasmImage} not found: ${msg}`);
     }
+    console.warn(
+      `docker pull ${kasmImage} failed, trying run directly: ${msg}`,
+    );
   }
   const stdout = await runDockerCommand(
     [
@@ -944,8 +935,6 @@ async function spawnAgentProcess(
   let dockerResult: DockerSpawnResult | undefined;
   if (config.sandboxType === 'docker-desktop') {
     try {
-      // Pre-flight: fail fast if Docker daemon is not running instead of
-      // hanging on docker run for 30s.
       await runDockerCommand(['info', '--format', '{{.ServerVersion}}'], false);
       entry.containerStatus = 'pulling';
       await saveRegistry(registry);
@@ -961,10 +950,9 @@ async function spawnAgentProcess(
     } catch (err) {
       entry.containerStatus = 'failed';
       console.error(
-        `Docker container spawn failed for ${id}, agent will run on host without a container:`,
+        `Docker container spawn failed for ${id}:`,
         err instanceof Error ? err.message : String(err),
       );
-      // Continue without a container; the agent process starts on the host.
     }
     await saveRegistry(registry);
   }

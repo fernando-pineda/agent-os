@@ -811,8 +811,6 @@ function createContainerScreenshotTool(containerName: string): Tool {
         };
       }
 
-      // Use `docker exec cat` instead of `docker cp -` which streams a
-      // TAR archive, not raw file bytes.
       const copied = await runContainerBinaryCommand([
         'exec',
         containerName,

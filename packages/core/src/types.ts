@@ -50,7 +50,6 @@ export interface AgentConfig {
     sshKeyPath?: string;
   };
   sandboxed?: boolean;
-  /** Selects the execution environment. Legacy sandboxed:true maps to host. */
   sandboxType?: 'host' | 'docker-desktop';
   kasmImage?: string;
   avatar?: AgentAvatar;
@@ -168,7 +167,6 @@ export interface ToolContext {
   agentId: string;
   workspace: string;
   homeDir: string;
-  /** Resolved model the calling agent runs on, so tools can inherit it. */
   model?: string;
   group?: string | undefined;
   signal?: AbortSignal | undefined;
