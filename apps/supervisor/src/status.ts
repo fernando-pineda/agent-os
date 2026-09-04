@@ -76,13 +76,15 @@ export class StatusTrackerImpl implements StatusTracker {
   // Rebuild one agent from its config (PATCH path), keep live status.
   async refreshAgent(config: AgentConfig): Promise<void> {
     const existing = this.info.get(config.id);
-    const status = existing?.status ?? 'stopped';
     // Reload registry from disk so vncPort/containerId changes from
     // start/stop are reflected, not just the tracker's stale copy.
     this.registry = await loadRegistry();
     const entry = this.registry.agents.find(
       (candidate) => candidate.id === config.id,
     );
+    // Use the entry's status if we have it (e.g. 'starting' for a new
+    // agent), not a hard-coded 'stopped' that hides the container spinner.
+    const status = existing?.status ?? entry?.status ?? 'stopped';
     const info = toAgentInfo(
       config,
       status,
@@ -138,22 +140,35 @@ export class StatusTrackerImpl implements StatusTracker {
     let changed = false;
     for (const config of configs) {
       const entry = await getOrCreateEntry(this.registry, config.id);
-      if (shouldSkipPoll(entry)) {
+      // Don't skip agents that have an active container operation
+      // (pulling/starting); their status must flow to the UI even
+      // though the agent process isn't up yet.
+      const hasActiveContainer =
+        entry.containerStatus === 'pulling' ||
+        entry.containerStatus === 'starting';
+      if (shouldSkipPoll(entry) && !hasActiveContainer) {
         continue;
       }
       const health = await pollAgent(config, entry.port);
       const existing = this.info.get(config.id);
       const currentStatus = existing?.status ?? 'stopped';
+      // When the container is pulling/starting, the agent process may
+      // not be up yet. Use the registry entry's status ('starting')
+      // instead of the health poll ('stopped') so the UI shows the
+      // container spinner, not "turned off".
+      const effectiveStatus = hasActiveContainer ? entry.status : health.status;
       if (
-        currentStatus !== health.status ||
+        currentStatus !== effectiveStatus ||
         existing?.currentTaskId !== health.currentTaskId ||
         existing?.group !== config.group ||
         existing?.name !== config.name ||
-        existing?.role !== config.role
+        existing?.role !== config.role ||
+        existing?.containerStatus !== entry.containerStatus ||
+        existing?.desktopPort !== entry.vncPort
       ) {
         const info = toAgentInfo(
           config,
-          health.status,
+          effectiveStatus,
           existing?.model ?? this.defaultModel,
           entry,
         );
@@ -162,7 +177,7 @@ export class StatusTrackerImpl implements StatusTracker {
         }
         info.lastEventAt = new Date().toISOString();
         this.info.set(config.id, info);
-        entry.status = health.status;
+        entry.status = effectiveStatus;
         entry.lastSeen = new Date().toISOString();
         entry.currentTaskId = health.currentTaskId;
         changed = true;
