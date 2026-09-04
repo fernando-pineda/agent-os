@@ -198,6 +198,7 @@ export interface SubagentStreamEvent {
     | 'tool-call-end'
     | 'tool-start'
     | 'tool-end'
+    | 'usage'
     | 'done'
     | 'settled';
   delta?: string;
@@ -207,6 +208,9 @@ export interface SubagentStreamEvent {
   result?: string;
   images?: Array<{ data: string; mimeType: string }>;
   isError?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
 }
 
 export interface ActiveSubagentRun {
@@ -216,6 +220,9 @@ export interface ActiveSubagentRun {
   status: 'running' | 'done' | 'stopped';
   startedAt: number;
   events: SubagentStreamEvent[];
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface SubagentSnapshot {

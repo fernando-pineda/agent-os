@@ -10,12 +10,12 @@ import {
   useState,
 } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { getSubagentStreamUrl, stopSubagent } from '@/lib/api';
 import type {
@@ -47,6 +47,7 @@ const eventTypes: readonly string[] = [
   'tool-call-end',
   'tool-start',
   'tool-end',
+  'usage',
   'done',
   'settled',
 ];
@@ -113,6 +114,9 @@ function parseStreamEvent(
   const args = value.args;
   const images = parseImages(value.images);
   const isError = getBoolean(value, 'isError');
+  const inputTokens = getNumber(value, 'inputTokens');
+  const outputTokens = getNumber(value, 'outputTokens');
+  const model = getString(value, 'model');
 
   if (delta !== undefined) event.delta = delta;
   if (toolCallId !== undefined) event.toolCallId = toolCallId;
@@ -121,6 +125,9 @@ function parseStreamEvent(
   if (isJsonObject(args)) event.args = args;
   if (images !== undefined) event.images = images;
   if (isError !== undefined) event.isError = isError;
+  if (inputTokens !== undefined) event.inputTokens = inputTokens;
+  if (outputTokens !== undefined) event.outputTokens = outputTokens;
+  if (model !== undefined) event.model = model;
   return event;
 }
 
@@ -144,13 +151,31 @@ function parseActiveRun(value: SubagentJsonValue): ActiveSubagentRun | null {
     return null;
   }
 
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let model: string | undefined;
   const events: SubagentStreamEvent[] = [];
   for (const eventValue of eventValues) {
     const event = parseStreamEvent(eventValue, runId);
     if (!event) return null;
+    if (event.type === 'usage') {
+      inputTokens += event.inputTokens ?? 0;
+      outputTokens += event.outputTokens ?? 0;
+      if (event.model) model = event.model;
+    }
     events.push(event);
   }
-  return { runId, name, task, status, startedAt, events };
+  return {
+    runId,
+    name,
+    task,
+    status,
+    startedAt,
+    events,
+    model,
+    inputTokens,
+    outputTokens,
+  };
 }
 
 function parseSnapshot(value: SubagentJsonValue): SubagentSnapshot | null {
@@ -207,7 +232,21 @@ function appendEvent(
         : event.type === 'done' || event.type === 'settled'
           ? 'done'
           : (envelope?.status ?? run.status);
-    return { ...run, status, events: [...run.events, event] };
+    const inputTokens =
+      run.inputTokens + (event.type === 'usage' ? (event.inputTokens ?? 0) : 0);
+    const outputTokens =
+      run.outputTokens +
+      (event.type === 'usage' ? (event.outputTokens ?? 0) : 0);
+    const model =
+      event.type === 'usage' && event.model ? event.model : run.model;
+    return {
+      ...run,
+      status,
+      events: [...run.events, event],
+      inputTokens,
+      outputTokens,
+      model,
+    };
   });
 
   if (matched || !envelope) return nextRuns;
@@ -220,6 +259,9 @@ function appendEvent(
       status: envelope.status,
       startedAt: Date.now(),
       events: [event],
+      model: event.type === 'usage' ? event.model : undefined,
+      inputTokens: event.type === 'usage' ? (event.inputTokens ?? 0) : 0,
+      outputTokens: event.type === 'usage' ? (event.outputTokens ?? 0) : 0,
     },
   ];
 }
@@ -411,6 +453,7 @@ function EventRow({ event }: { event: SubagentStreamEvent }): ReactNode {
     case 'done':
     case 'settled':
     case 'text':
+    case 'usage':
       return null;
   }
 }
@@ -590,37 +633,59 @@ export function SubagentPanel({
         </div>
       </aside>
 
-      {/* Read-only detail dialog */}
-      <Dialog
+      {/* Read-only detail drawer */}
+      <Drawer
         open={selectedRun !== null}
         onOpenChange={(open) => {
           if (!open) setSelectedRunId(null);
         }}
       >
-        <DialogContent className="flex max-h-[80vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <DrawerContent className="flex max-w-md flex-col">
+          <DrawerHeader className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
               {selectedRun && (
                 <>
                   <span
                     className={`size-2.5 rounded-full ${statusDotClass(selectedRun.status)}`}
                   />
-                  {selectedRun.name}
+                  <DrawerTitle>{selectedRun.name}</DrawerTitle>
                 </>
               )}
-            </DialogTitle>
-            <DialogDescription className="text-zinc-400">
-              {selectedRun?.task}
-            </DialogDescription>
-          </DialogHeader>
+            </div>
+            <button
+              type="button"
+              className="text-zinc-400 hover:text-zinc-100"
+              onClick={() => setSelectedRunId(null)}
+            >
+              <XIcon className="size-4" />
+            </button>
+          </DrawerHeader>
           {selectedRun && (
-            <ReadOnlyRunView
-              run={selectedRun}
-              onClose={() => setSelectedRunId(null)}
-            />
+            <>
+              <DrawerDescription className="px-4 pb-2 text-zinc-400">
+                {selectedRun.task}
+              </DrawerDescription>
+              <div className="flex items-center gap-4 border-b border-zinc-800 px-4 py-2 text-[0.7rem] text-zinc-500">
+                {selectedRun.model && (
+                  <span className="truncate font-mono">
+                    {selectedRun.model}
+                  </span>
+                )}
+                <span className="shrink-0">
+                  {(selectedRun.inputTokens / 1000).toFixed(1)}k in
+                </span>
+                <span className="shrink-0">
+                  {(selectedRun.outputTokens / 1000).toFixed(1)}k out
+                </span>
+              </div>
+              <ReadOnlyRunView
+                run={selectedRun}
+                onClose={() => setSelectedRunId(null)}
+              />
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
     </>
   );
 }

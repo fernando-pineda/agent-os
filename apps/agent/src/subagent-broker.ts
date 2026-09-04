@@ -16,6 +16,7 @@ export interface SubagentStreamEvent {
     | 'tool-call-end'
     | 'tool-start'
     | 'tool-end'
+    | 'usage'
     | 'done'
     | 'settled';
   delta?: string;
@@ -25,6 +26,9 @@ export interface SubagentStreamEvent {
   result?: string;
   images?: Array<{ data: string; mimeType: string }>;
   isError?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
 }
 
 export interface ActiveRun {
@@ -34,6 +38,9 @@ export interface ActiveRun {
   status: 'running' | 'done' | 'stopped';
   startedAt: number;
   events: SubagentStreamEvent[];
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface SubagentListener {
@@ -77,6 +84,8 @@ export function startRun(runId: string, name: string, task: string): void {
     status: 'running',
     startedAt: Date.now(),
     events: [],
+    inputTokens: 0,
+    outputTokens: 0,
   });
   runAborters.delete(runId);
 }
@@ -137,6 +146,11 @@ export function subscribe(listener: SubagentListener): () => void {
 export function storeEvent(runId: string, event: SubagentStreamEvent): void {
   const run = activeRuns.get(runId);
   if (!run) return;
+  if (event.type === 'usage') {
+    run.inputTokens += event.inputTokens ?? 0;
+    run.outputTokens += event.outputTokens ?? 0;
+    if (event.model) run.model = event.model;
+  }
   run.events.push(event);
   notifyListeners(event);
 }
@@ -204,6 +218,16 @@ export function normalizePiEvent(
       };
     }
     return null;
+  }
+  if (event.type === 'message_end' && event.message.role === 'assistant') {
+    const u = event.message.usage;
+    return {
+      runId,
+      type: 'usage',
+      inputTokens: u.input,
+      outputTokens: u.output,
+      model: event.message.model,
+    };
   }
   if (event.type === 'tool_execution_start') {
     return {
