@@ -551,13 +551,17 @@ export function AgentsPanel() {
       .finally(() => setLoadingModels(false));
   }, [model]);
 
-  const refreshMcpServers = useCallback(async () => {
+  const refreshMcpServers = useCallback(async (): Promise<
+    McpServerConfig[]
+  > => {
     setMcpLoading(true);
     try {
       const list = await getMcpServers();
       setMcpServers(list);
+      return list;
     } catch (err) {
       console.error(err);
+      return [];
     } finally {
       setMcpLoading(false);
     }
@@ -577,12 +581,12 @@ export function AgentsPanel() {
     if (dialogOpen) {
       setReminders([]);
       void (async () => {
-        await refreshMcpServers();
-        const available = new Set(mcpServers.map((s) => s.name));
+        const list = await refreshMcpServers();
+        const available = new Set(list.map((s) => s.name));
         setSelectedPlugins(DEFAULT_PLUGINS.filter((p) => available.has(p)));
       })();
     }
-  }, [dialogOpen, refreshMcpServers, mcpServers]);
+  }, [dialogOpen, refreshMcpServers]);
 
   const onCreate = useCallback(async () => {
     if (!name.trim()) return;
