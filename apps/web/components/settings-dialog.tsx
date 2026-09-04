@@ -34,7 +34,12 @@ import {
   updateMcpServer,
   updateSubagent,
 } from '@/lib/api';
-import type { McpServerConfig, McpStatus, SubagentConfig } from '@/lib/types';
+import type {
+  McpServerConfig,
+  McpStatus,
+  ModelItem,
+  SubagentConfig,
+} from '@/lib/types';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -477,6 +482,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         }}
         editing={editingSubagent}
         onSubmitted={onSubagentFormSubmit}
+        models={models}
       />
 
       <Dialog
@@ -807,6 +813,7 @@ interface SubagentFormProps {
   onOpenChange: (open: boolean) => void;
   editing: SubagentConfig | null;
   onSubmitted: () => void;
+  models: ModelItem[];
 }
 
 function SubagentForm({
@@ -814,6 +821,7 @@ function SubagentForm({
   onOpenChange,
   editing,
   onSubmitted,
+  models,
 }: SubagentFormProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -928,13 +936,18 @@ function SubagentForm({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs text-zinc-400">Model</label>
-            <Input
+            <ModelPickerModal
+              models={models}
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={setModel}
+              loading={models.length === 0}
+              allowManual={models.length === 0}
               placeholder="Inherits parent model"
-              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+              label="Model (optional)"
             />
+            <p className="mt-1 text-xs text-zinc-500">
+              Leave empty to inherit the parent agent model.
+            </p>
           </div>
 
           <div>
