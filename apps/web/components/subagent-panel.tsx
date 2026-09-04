@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -37,6 +38,7 @@ interface SubagentStreamEnvelope {
 }
 
 type ChatEntry =
+  | { kind: 'user'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'event'; event: SubagentStreamEvent };
 
@@ -266,8 +268,11 @@ function appendEvent(
   ];
 }
 
-function buildChatEntries(events: SubagentStreamEvent[]): ChatEntry[] {
-  const entries: ChatEntry[] = [];
+function buildChatEntries(
+  task: string,
+  events: SubagentStreamEvent[],
+): ChatEntry[] {
+  const entries: ChatEntry[] = [{ kind: 'user', text: task }];
   for (const event of events) {
     if (event.type === 'text') {
       const last = entries[entries.length - 1];
@@ -276,7 +281,7 @@ function buildChatEntries(events: SubagentStreamEvent[]): ChatEntry[] {
       } else {
         entries.push({ kind: 'text', text: event.delta ?? '' });
       }
-    } else {
+    } else if (event.type !== 'usage') {
       entries.push({ kind: 'event', event });
     }
   }
@@ -469,26 +474,47 @@ function ReadOnlyRunView({
   run: ActiveSubagentRun;
   onClose: () => void;
 }): ReactNode {
-  const entries = buildChatEntries(run.events);
+  const entries = buildChatEntries(run.task, run.events);
   const completed = run.status !== 'running';
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [entries.length]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="space-y-2">
-          {entries.map((entry, index) =>
-            entry.kind === 'text' ? (
-              <div
-                key={`text-${index}`}
-                className="rounded-lg bg-zinc-800 px-3 py-2 text-sm leading-5 whitespace-pre-wrap text-zinc-100"
-              >
-                {entry.text}
-              </div>
-            ) : (
+          {entries.map((entry, index) => {
+            if (entry.kind === 'user') {
+              return (
+                <div
+                  key={`user-${index}`}
+                  className="ml-auto max-w-[85%] rounded-lg bg-zinc-700 px-3 py-2 text-sm leading-5 whitespace-pre-wrap text-zinc-100"
+                >
+                  {entry.text}
+                </div>
+              );
+            }
+            if (entry.kind === 'text') {
+              return (
+                <div
+                  key={`text-${index}`}
+                  className="rounded-lg bg-zinc-800 px-3 py-2 text-sm leading-5 whitespace-pre-wrap text-zinc-100"
+                >
+                  {entry.text}
+                </div>
+              );
+            }
+            return (
               <div key={`${entry.event.type}-${index}`}>
                 <EventRow event={entry.event} />
               </div>
-            ),
-          )}
+            );
+          })}
           {completed && (
             <div className="pt-2 text-center text-[0.7rem] text-zinc-600">
               {statusLabel(run.status)}
