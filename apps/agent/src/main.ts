@@ -245,6 +245,7 @@ async function createSession(
         agentId: config.agent.id,
         agentName: agent.name,
         ...(agent.role ? { role: agent.role } : {}),
+        ...(agent.group ? { group: agent.group } : {}),
         ...(agent.instructions ? { instructions: agent.instructions } : {}),
         memoryIndex,
         reminders,
@@ -271,6 +272,7 @@ interface SystemPromptInputs {
   agentId: string;
   agentName?: string;
   role?: string;
+  group?: string;
   instructions?: string;
   memoryIndex?: string;
   reminders: string[];
@@ -315,6 +317,9 @@ function buildAgentSystemPrompt(inputs: SystemPromptInputs): string {
     inputs.role
       ? `Your role in the team: ${inputs.role}. Let it shape your priorities and tone.`
       : '',
+    inputs.group
+      ? `Your group is "${inputs.group}". You see only agents in this group.`
+      : 'You are not in any group, so you see every agent across every group.',
     inputs.instructions
       ? `Additional instructions for this agent:\n${inputs.instructions}`
       : '',
@@ -380,7 +385,11 @@ Decline illegal or harmful tasks briefly, without lecturing, and suggest a legit
 
 You can manage the agent fleet with agent_list, agent_create, agent_update and agent_delete. Create and update are safe to run when the user asks.
 
-Visibility is scoped by group. If you belong to a group, agent_list shows only agents in your group. If you are not in any group, you see every agent across every group. Each agent_list entry includes what the agent does (role, instructions) and its plugins, so you can judge whether it is worth calling.
+Visibility is scoped by group. ${
+    inputs.group
+      ? `You belong to group "${inputs.group}", so agent_list shows only agents in your group.`
+      : 'You are not in any group, so you see every agent across every group.'
+  } Each agent_list entry includes what the agent does (role, instructions) and its plugins, so you can judge whether it is worth calling.
 
 Deleting an agent is irreversible. Call agent_delete only when the user explicitly asked for that deletion and provided the agent's exact name as confirmation; pass it as confirmName.`;
   const reminders =

@@ -21,6 +21,7 @@ interface RunAgentLoopDeps {
   agentId?: string;
   agentName?: string;
   role?: string;
+  group?: string;
   instructions?: string;
   memoryIndex?: string;
   reminders?: string[];
@@ -76,6 +77,9 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     deps.role
       ? `Your role in the team: ${deps.role}. Let it shape your priorities and tone.`
       : '',
+    deps.group
+      ? `Your group is "${deps.group}". You see only agents in this group.`
+      : 'You are not in any group, so you see every agent across every group.',
     deps.instructions
       ? `Additional instructions for this agent:\n${deps.instructions}`
       : '',
@@ -143,7 +147,11 @@ Decline illegal or harmful tasks briefly, without lecturing, and suggest a legit
 
 You can manage the agent fleet with agent_list, agent_create, agent_update and agent_delete. Create and update are safe to run when the user asks.
 
-Visibility is scoped by group. If you belong to a group, agent_list shows only agents in your group. If you are not in any group, you see every agent across every group. Each agent_list entry includes what the agent does (role, instructions) and its plugins, so you can judge whether it is worth calling.
+Visibility is scoped by group. ${
+    deps.group
+      ? `You belong to group "${deps.group}", so agent_list shows only agents in your group.`
+      : 'You are not in any group, so you see every agent across every group.'
+  } Each agent_list entry includes what the agent does (role, instructions) and its plugins, so you can judge whether it is worth calling.
 
 Deleting an agent is irreversible. Call agent_delete only when the user explicitly asked for that deletion and provided the agent's exact name as confirmation; pass it as confirmName.`;
 
