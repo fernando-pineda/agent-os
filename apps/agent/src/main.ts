@@ -43,6 +43,7 @@ let serverRef: ReturnType<typeof createAgentServer>;
 let sessionHandle: PiSessionHandle | undefined;
 let stopCompaction: () => void = () => undefined;
 const tsxModuleName = 'tsx';
+const turnState = { replyDepth: 0, atCap: false };
 
 async function main(): Promise<void> {
   await import(tsxModuleName);
@@ -92,7 +93,7 @@ async function main(): Promise<void> {
     mcpConnections: initialMcpConnections,
     isBusy: () => serverRef.isBusy(),
     buildContext: (signal) =>
-      buildContext(agentId, workspace, homeDir, signal, agent),
+      buildContext(agentId, workspace, homeDir, signal, agent, turnState),
   });
 
   const server = createAgentServer({
@@ -106,11 +107,12 @@ async function main(): Promise<void> {
     sessionHandle: initialSessionHandle,
     tools,
     status: 'starting',
+    turnState,
     onStatusChange: (status) => {
       _currentStatus = status;
     },
     buildContext: (signal) =>
-      buildContext(agentId, workspace, homeDir, signal, agent),
+      buildContext(agentId, workspace, homeDir, signal, agent, turnState),
     sendAgentMessage: (to, msg, opts) =>
       sendAgentMessageHttp(
         to,
@@ -238,7 +240,14 @@ async function createSession(
       }),
     initialMessages: uiMessagesToChat(thread),
     contextFactory: (signal) =>
-      buildContext(config.agent.id, config.workspace, homeDir, signal, agent),
+      buildContext(
+        config.agent.id,
+        config.workspace,
+        homeDir,
+        signal,
+        agent,
+        turnState,
+      ),
     extensionFactories: [mcpExtension],
   };
   return createPiSession(sessionConfig);
@@ -397,7 +406,21 @@ function buildContext(
   homeDir: string,
   signal: AbortSignal | undefined,
   agent: AgentConfig,
+  turnState: { replyDepth: number; atCap: boolean },
 ): ToolContext {
+  const baseSend = (
+    to: string,
+    msg: string,
+    opts?: { replyDepth?: number; taskId?: string },
+  ): Promise<string> =>
+    sendAgentMessageHttp(
+      to,
+      msg,
+      homeDir,
+      opts?.replyDepth ?? turnState.replyDepth,
+      opts?.taskId,
+    );
+
   return {
     agentId,
     workspace,
@@ -405,14 +428,10 @@ function buildContext(
     signal,
     group: agent.group,
     env: buildEnv(agent),
-    sendAgentMessage: (to, msg, opts) =>
-      sendAgentMessageHttp(
-        to,
-        msg,
-        homeDir,
-        opts?.replyDepth ?? 0,
-        opts?.taskId,
-      ),
+    replyDepth: turnState.replyDepth,
+    sendAgentMessage: turnState.atCap
+      ? () => Promise.resolve('Reply limit reached, message not sent.')
+      : baseSend,
   };
 }
 

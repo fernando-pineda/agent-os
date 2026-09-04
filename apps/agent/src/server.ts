@@ -57,6 +57,7 @@ export interface ServerDeps {
     tools: Tool[];
     sessionHandle: PiSessionHandle;
   }>;
+  turnState: { replyDepth: number; atCap: boolean };
 }
 
 export interface AgentServer {
@@ -531,6 +532,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     const promptText =
       [...chatMessages].reverse().find((message) => message.role === 'user')
         ?.content ?? '';
+    const userImages = extractUserImages(messages);
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
     let lastUsage: { inputTokens: number; outputTokens: number } | undefined;
@@ -581,7 +583,11 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           }
         });
         try {
-          await serverDeps.sessionHandle.prompt(promptText, controller.signal);
+          await serverDeps.sessionHandle.prompt(
+            promptText,
+            controller.signal,
+            userImages,
+          );
           await enqueuePersist(() =>
             persistTurn(messages, segments, serverDeps),
           );
@@ -638,6 +644,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     ];
 
     const controller = new AbortController();
+
+    serverDeps.turnState.replyDepth = depth;
+    serverDeps.turnState.atCap = atCap;
 
     void processInbox(
       {
@@ -710,6 +719,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     } catch (err) {
       console.error('Inbox loop error', err);
     } finally {
+      serverDeps.turnState.replyDepth = 0;
+      serverDeps.turnState.atCap = false;
       unsubscribe?.();
       controller.abort();
       controls.setStatus('online');
@@ -717,6 +728,26 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       controls.markRunning(false);
     }
   }
+}
+
+function extractUserImages(
+  messages: UIMessage[],
+): Array<{ data: string; mimeType: string }> | undefined {
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return undefined;
+  const images: Array<{ data: string; mimeType: string }> = [];
+  for (const part of lastUser.parts ?? []) {
+    if (part.type === 'image' && part.image) {
+      const src = part.image;
+      if (typeof src === 'string' && src.startsWith('data:')) {
+        const match = /^data:(image\/[a-z]+);base64,(.+)$/i.exec(src);
+        if (match?.[1] && match?.[2]) {
+          images.push({ mimeType: match[1], data: match[2] });
+        }
+      }
+    }
+  }
+  return images.length > 0 ? images : undefined;
 }
 
 type PiSessionEvent = Parameters<
@@ -867,7 +898,9 @@ function handleSessionEvent(
     return;
   }
   if (event.type === 'agent_end') {
-    onAgentEnd?.();
+    if (!event.willRetry) {
+      onAgentEnd?.();
+    }
   }
 }
 

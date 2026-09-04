@@ -44,7 +44,11 @@ export interface PiSessionConfig {
 export interface PiSessionHandle {
   session: AgentSession;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
-  prompt(text: string, signal?: AbortSignal): Promise<void>;
+  prompt(
+    text: string,
+    signal?: AbortSignal,
+    images?: Array<{ data: string; mimeType: string }>,
+  ): Promise<void>;
   abort(): Promise<void>;
   compact(): Promise<void>;
   dispose(): void;
@@ -312,9 +316,16 @@ export async function createPiSession(
   return {
     session,
     subscribe: (listener): (() => void) => session.subscribe(listener),
-    prompt: async (text, signal): Promise<void> => {
+    prompt: async (text, signal, images): Promise<void> => {
+      const piImages = images?.map((img) => ({
+        type: 'image' as const,
+        data: img.data,
+        mimeType: img.mimeType,
+      }));
+      const promptOpts = piImages ? { images: piImages } : undefined;
+
       if (!signal) {
-        await session.prompt(text);
+        await session.prompt(text, promptOpts);
         return;
       }
       if (signal.aborted) {
@@ -331,7 +342,7 @@ export async function createPiSession(
       };
       signal.addEventListener('abort', abortHandler, { once: true });
       try {
-        await session.prompt(text);
+        await session.prompt(text, promptOpts);
       } finally {
         signal.removeEventListener('abort', abortHandler);
       }
