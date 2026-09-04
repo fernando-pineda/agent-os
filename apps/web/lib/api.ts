@@ -17,6 +17,8 @@ import type {
   OnboardingPayload,
   OnboardingStatus,
   RunAutomationResponse,
+  SubagentConfig,
+  SubagentsResponse,
   UpdateAgentPayload,
   UpdateAutomationPayload,
   UpdateConfigPayload,
@@ -203,6 +205,41 @@ export async function updateMcpServer(
 
 export async function deleteMcpServer(name: string): Promise<void> {
   await fetchJson(`${BASE}/api/mcp/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getSubagents(): Promise<SubagentConfig[]> {
+  const res = await fetchJson<SubagentsResponse>(`${BASE}/api/subagents`);
+  return res.subagents;
+}
+
+export async function createSubagent(
+  config: SubagentConfig,
+): Promise<SubagentConfig> {
+  return fetchJson<SubagentConfig>(`${BASE}/api/subagents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+}
+
+export async function updateSubagent(
+  name: string,
+  patch: Partial<SubagentConfig>,
+): Promise<SubagentConfig> {
+  return fetchJson<SubagentConfig>(
+    `${BASE}/api/subagents/${encodeURIComponent(name)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export async function deleteSubagent(name: string): Promise<void> {
+  await fetchJson(`${BASE}/api/subagents/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   });
 }

@@ -26,6 +26,7 @@ export interface AgentInfo {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  subagents?: string[];
   reminders?: string[];
 }
 
@@ -62,6 +63,7 @@ export interface CreateAgentPayload {
   model?: string;
   avatar?: AgentAvatar;
   plugins?: string[];
+  subagents?: string[];
   reminders?: string[];
 }
 
@@ -75,6 +77,7 @@ export interface UpdateAgentPayload {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  subagents?: string[];
   reminders?: string[];
 }
 
@@ -100,6 +103,18 @@ export interface McpServerConfig {
 
 export interface McpServersResponse {
   servers: McpServerConfig[];
+}
+
+export interface SubagentConfig {
+  name: string;
+  description: string;
+  model?: string;
+  tools?: string[];
+  systemPrompt: string;
+}
+
+export interface SubagentsResponse {
+  subagents: SubagentConfig[];
 }
 
 export type McpStatus = 'online' | 'offline' | 'unknown';

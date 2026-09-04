@@ -46,6 +46,11 @@ import {
   updateSubagent,
 } from './subagents.js';
 
+type AgentCreationInput = CreateAgentInput & { subagents?: string[] };
+type AgentConfigPatch = Parameters<typeof updateAgentConfig>[1] & {
+  subagents?: string[];
+};
+
 const port = Number(process.env.PORT ?? 8787);
 
 export function startServer(
@@ -381,7 +386,7 @@ async function handle(
   if (pathname === '/api/agents' && req.method === 'POST') {
     const raw = await readJson(req);
     const body = raw as Record<string, unknown>;
-    const input: CreateAgentInput = { name: String(body.name ?? '') };
+    const input: AgentCreationInput = { name: String(body.name ?? '') };
     if (typeof body.group === 'string') input.group = body.group;
     if (typeof body.workspace === 'string') input.workspace = body.workspace;
     if (typeof body.role === 'string') input.role = body.role;
@@ -412,6 +417,15 @@ async function handle(
         return;
       }
       input.plugins = body.plugins as string[];
+    }
+    if (body.subagents !== undefined) {
+      const subagentsError = validateStringArray(body.subagents, 'subagents');
+      if (subagentsError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: subagentsError }));
+        return;
+      }
+      input.subagents = body.subagents as string[];
     }
     if (body.reminders !== undefined) {
       const remindersError = validateStringArray(body.reminders, 'reminders');
@@ -447,7 +461,7 @@ async function handle(
   if (matchAgentId && matchAgentId[1] !== 'events' && req.method === 'PATCH') {
     const id = decodeURIComponent(matchAgentId[1]!);
     const body = (await readJson(req)) as Record<string, unknown>;
-    const patch: Parameters<typeof updateAgentConfig>[1] = {};
+    const patch: AgentConfigPatch = {};
     if (typeof body.name === 'string') patch.name = body.name;
     if (typeof body.group === 'string') patch.group = body.group;
     if (typeof body.role === 'string') patch.role = body.role;
@@ -468,6 +482,15 @@ async function handle(
         return;
       }
       patch.plugins = body.plugins as string[];
+    }
+    if (body.subagents !== undefined) {
+      const subagentsError = validateStringArray(body.subagents, 'subagents');
+      if (subagentsError) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: subagentsError }));
+        return;
+      }
+      patch.subagents = body.subagents as string[];
     }
     if (body.reminders !== undefined) {
       const remindersError = validateStringArray(body.reminders, 'reminders');

@@ -53,6 +53,7 @@ export interface AgentConfig {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  subagents?: string[];
   reminders?: string[];
   createdAt: string;
 }
@@ -79,6 +80,7 @@ export interface AgentInfo {
   avatar?: AgentAvatar;
   instructions?: string;
   plugins?: string[];
+  subagents?: string[];
   reminders?: string[];
 }
 

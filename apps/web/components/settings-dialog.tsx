@@ -23,14 +23,18 @@ import {
 } from '@/components/ui/tabs';
 import {
   createMcpServer,
+  createSubagent,
   deleteMcpServer,
+  deleteSubagent,
   getConfig,
   getMcpServers,
   getMcpStatuses,
+  getSubagents,
   updateConfig,
   updateMcpServer,
+  updateSubagent,
 } from '@/lib/api';
-import type { McpServerConfig, McpStatus } from '@/lib/types';
+import type { McpServerConfig, McpStatus, SubagentConfig } from '@/lib/types';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -59,6 +63,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   );
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [subagents, setSubagents] = useState<SubagentConfig[]>([]);
+  const [subagentError, setSubagentError] = useState('');
+  const [subagentFormOpen, setSubagentFormOpen] = useState(false);
+  const [editingSubagent, setEditingSubagent] = useState<SubagentConfig | null>(
+    null,
+  );
+  const [subagentDeleteTarget, setSubagentDeleteTarget] =
+    useState<SubagentConfig | null>(null);
+  const [subagentDeleting, setSubagentDeleting] = useState(false);
+  const [subagentDeleteError, setSubagentDeleteError] = useState('');
 
   const refreshServers = useCallback(async () => {
     try {
@@ -85,11 +99,23 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     }
   }, []);
 
+  const refreshSubagents = useCallback(async () => {
+    try {
+      const list = await getSubagents();
+      setSubagents(list);
+    } catch (err) {
+      setSubagentError(
+        err instanceof Error ? err.message : 'Failed to load subagents',
+      );
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     setConfigError('');
     setSaved(false);
     setMcpError('');
+    setSubagentError('');
     getConfig()
       .then((cfg) => {
         setDefaultModel(cfg.defaultModel ?? '');
@@ -102,7 +128,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       });
     void refreshServers();
     void refreshStatuses();
-  }, [open, refreshServers, refreshStatuses]);
+    void refreshSubagents();
+  }, [open, refreshServers, refreshStatuses, refreshSubagents]);
 
   const onSaveConfig = useCallback(async () => {
     setSaving(true);
@@ -176,6 +203,53 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     closeForm();
   }, [refreshServers, refreshStatuses, closeForm]);
 
+  const openNewSubagentForm = useCallback(() => {
+    setEditingSubagent(null);
+    setSubagentFormOpen(true);
+  }, []);
+
+  const openEditSubagentForm = useCallback((subagent: SubagentConfig) => {
+    setEditingSubagent(subagent);
+    setSubagentFormOpen(true);
+  }, []);
+
+  const closeSubagentForm = useCallback(() => {
+    setSubagentFormOpen(false);
+    setEditingSubagent(null);
+  }, []);
+
+  const openSubagentDeleteDialog = useCallback((subagent: SubagentConfig) => {
+    setSubagentDeleteTarget(subagent);
+    setSubagentDeleteError('');
+  }, []);
+
+  const closeSubagentDeleteDialog = useCallback(() => {
+    setSubagentDeleteTarget(null);
+    setSubagentDeleteError('');
+  }, []);
+
+  const confirmSubagentDelete = useCallback(async () => {
+    if (!subagentDeleteTarget) return;
+    setSubagentDeleting(true);
+    setSubagentDeleteError('');
+    try {
+      await deleteSubagent(subagentDeleteTarget.name);
+      closeSubagentDeleteDialog();
+      void refreshSubagents();
+    } catch (err) {
+      setSubagentDeleteError(
+        err instanceof Error ? err.message : 'Failed to delete subagent',
+      );
+    } finally {
+      setSubagentDeleting(false);
+    }
+  }, [subagentDeleteTarget, closeSubagentDeleteDialog, refreshSubagents]);
+
+  const onSubagentFormSubmit = useCallback(() => {
+    void refreshSubagents();
+    closeSubagentForm();
+  }, [refreshSubagents, closeSubagentForm]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
@@ -190,6 +264,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <TabsList>
             <TabsTab value="general">General</TabsTab>
             <TabsTab value="plugins">Plugins</TabsTab>
+            <TabsTab value="subagents">Subagents</TabsTab>
             <TabsTab value="reminders">Reminders</TabsTab>
             <TabsIndicator />
           </TabsList>
@@ -303,6 +378,68 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             </div>
           </TabsPanel>
 
+          <TabsPanel value="subagents">
+            <div className="space-y-3 py-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-400">Subagents</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-zinc-300"
+                  onClick={openNewSubagentForm}
+                >
+                  + New
+                </Button>
+              </div>
+
+              {subagentError && (
+                <div className="text-xs text-destructive">{subagentError}</div>
+              )}
+
+              {subagents.length === 0 ? (
+                <div className="py-4 text-center text-sm text-zinc-500">
+                  No subagents yet.
+                </div>
+              ) : (
+                <div className="max-h-[40vh] space-y-1 overflow-y-auto pr-1">
+                  {subagents.map((subagent) => (
+                    <div
+                      key={subagent.name}
+                      className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm text-zinc-100">
+                          {subagent.name}
+                        </div>
+                        <div className="truncate text-xs text-zinc-500">
+                          {subagent.description}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-zinc-400 hover:text-zinc-100"
+                          onClick={() => openEditSubagentForm(subagent)}
+                        >
+                          <PencilIcon />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-zinc-400 hover:text-red-400"
+                          onClick={() => openSubagentDeleteDialog(subagent)}
+                        >
+                          <Trash2Icon />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </TabsPanel>
+
           <TabsPanel value="reminders">
             <div className="space-y-3 py-2">
               <p className="text-xs text-zinc-500">
@@ -332,6 +469,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         onSubmitted={onFormSubmit}
       />
 
+      <SubagentForm
+        open={subagentFormOpen}
+        onOpenChange={(v) => {
+          if (!v) closeSubagentForm();
+          else setSubagentFormOpen(v);
+        }}
+        editing={editingSubagent}
+        onSubmitted={onSubagentFormSubmit}
+      />
+
       <Dialog
         open={deleteTarget !== null}
         onOpenChange={(v) => {
@@ -356,6 +503,37 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               className="w-full"
             >
               {deleting ? 'Deleting...' : 'Delete server'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={subagentDeleteTarget !== null}
+        onOpenChange={(v) => {
+          if (!v) closeSubagentDeleteDialog();
+        }}
+      >
+        <DialogContent className="border-zinc-800 bg-zinc-900 text-zinc-100">
+          <DialogHeader>
+            <DialogTitle>Delete {subagentDeleteTarget?.name}</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              This will permanently remove this subagent from the configuration.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {subagentDeleteError && (
+              <div className="text-xs text-destructive">
+                {subagentDeleteError}
+              </div>
+            )}
+            <Button
+              variant="destructive"
+              onClick={confirmSubagentDelete}
+              disabled={subagentDeleting}
+              className="w-full"
+            >
+              {subagentDeleting ? 'Deleting...' : 'Delete subagent'}
             </Button>
           </div>
         </DialogContent>
@@ -618,6 +796,163 @@ function McpServerForm({
         )}
         <Button onClick={onSubmit} disabled={saving} className="mt-2 w-full">
           {saving ? 'Saving...' : editing ? 'Save changes' : 'Create server'}
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface SubagentFormProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editing: SubagentConfig | null;
+  onSubmitted: () => void;
+}
+
+function SubagentForm({
+  open,
+  onOpenChange,
+  editing,
+  onSubmitted,
+}: SubagentFormProps) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [model, setModel] = useState('');
+  const [tools, setTools] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    if (editing) {
+      setName(editing.name);
+      setDescription(editing.description);
+      setSystemPrompt(editing.systemPrompt);
+      setModel(editing.model ?? '');
+      setTools((editing.tools ?? []).join(', '));
+    } else {
+      setName('');
+      setDescription('');
+      setSystemPrompt('');
+      setModel('');
+      setTools('');
+    }
+  }, [open, editing]);
+
+  const onSubmit = useCallback(async () => {
+    if (!name.trim()) {
+      setError('Name is required');
+      return;
+    }
+    if (!description.trim()) {
+      setError('Description is required');
+      return;
+    }
+    if (!systemPrompt.trim()) {
+      setError('System prompt is required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const payload: SubagentConfig = {
+        name: name.trim(),
+        description: description.trim(),
+        systemPrompt: systemPrompt.trim(),
+      };
+      if (model.trim()) payload.model = model.trim();
+      const parsedTools = tools
+        .split(',')
+        .map((tool) => tool.trim())
+        .filter((tool) => tool.length > 0);
+      if (parsedTools.length > 0) payload.tools = parsedTools;
+
+      if (editing) {
+        await updateSubagent(editing.name, payload);
+      } else {
+        await createSubagent(payload);
+      }
+      onSubmitted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save subagent');
+    } finally {
+      setSaving(false);
+    }
+  }, [name, description, systemPrompt, model, tools, editing, onSubmitted]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {editing ? 'Edit subagent' : 'New subagent'}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3 overflow-y-auto py-2 pr-1">
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Name</label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="researcher"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">
+              Description
+            </label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="A focused research assistant"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">
+              System Prompt
+            </label>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a research assistant..."
+              rows={6}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Model</label>
+            <Input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="Inherits parent model"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">Tools</label>
+            <Input
+              value={tools}
+              onChange={(e) => setTools(e.target.value)}
+              placeholder="bash, read, ls, grep, find"
+              className="border-zinc-800 bg-zinc-950 text-zinc-100"
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="px-1 pb-2 text-xs text-destructive">{error}</div>
+        )}
+        <Button onClick={onSubmit} disabled={saving} className="mt-2 w-full">
+          {saving ? 'Saving...' : editing ? 'Save changes' : 'Create subagent'}
         </Button>
       </DialogContent>
     </Dialog>

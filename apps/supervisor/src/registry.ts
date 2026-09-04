@@ -140,6 +140,7 @@ export interface CreateAgentInput {
   avatar?: AgentAvatar | undefined;
   instructions?: string | undefined;
   plugins?: string[] | undefined;
+  subagents?: string[] | undefined;
   reminders?: string[] | undefined;
   git?: {
     userName?: string;
@@ -174,6 +175,7 @@ export async function updateAgentConfig(
     avatar?: AgentAvatar | undefined;
     instructions?: string | undefined;
     plugins?: string[] | undefined;
+    subagents?: string[] | undefined;
     reminders?: string[] | undefined;
   },
 ): Promise<AgentConfig | null> {
@@ -193,6 +195,7 @@ export async function updateAgentConfig(
   if (patch.instructions !== undefined)
     config.instructions = patch.instructions;
   if (patch.plugins !== undefined) config.plugins = patch.plugins;
+  if (patch.subagents !== undefined) config.subagents = patch.subagents;
   if (patch.reminders !== undefined) config.reminders = patch.reminders;
   if (patch.workspace !== undefined) {
     const validationError = validateWorkspace(patch.workspace);
@@ -801,6 +804,9 @@ export function toAgentInfo(
   }
   if (config.plugins) {
     info.plugins = config.plugins;
+  }
+  if (config.subagents) {
+    info.subagents = config.subagents;
   }
   if (config.reminders) {
     info.reminders = config.reminders;

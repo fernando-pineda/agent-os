@@ -52,6 +52,7 @@ import {
   deleteGroup,
   getMcpServers,
   getModels,
+  getSubagents,
   startAgent,
   stopAgent,
   updateAgent,
@@ -69,6 +70,7 @@ import type {
   AgentStatus,
   McpServerConfig,
   ModelItem,
+  SubagentConfig,
 } from '@/lib/types';
 
 // MCP plugins preselected on the create form. Names must exist in the
@@ -131,6 +133,10 @@ function AgentForm({
   mcpLoading,
   selectedPlugins,
   onTogglePlugin,
+  subagents,
+  subagentsLoading,
+  selectedSubagents,
+  onToggleSubagent,
   reminders,
   onReminders,
   footer,
@@ -154,6 +160,10 @@ function AgentForm({
   mcpLoading: boolean;
   selectedPlugins: string[];
   onTogglePlugin: (name: string, checked: boolean) => void;
+  subagents: SubagentConfig[];
+  subagentsLoading: boolean;
+  selectedSubagents: string[];
+  onToggleSubagent: (name: string, checked: boolean) => void;
   reminders: string[];
   onReminders: (next: string[]) => void;
   footer?: React.ReactNode;
@@ -165,6 +175,7 @@ function AgentForm({
         <TabsTab value="instructions">Instructions & roles</TabsTab>
         <TabsTab value="automations">Automations</TabsTab>
         <TabsTab value="plugins">Active plugins</TabsTab>
+        <TabsTab value="subagents">Subagents</TabsTab>
         <TabsTab value="reminders">Reminders</TabsTab>
         <TabsIndicator />
       </TabsList>
@@ -259,6 +270,44 @@ function AgentForm({
                     </div>
                     <div className="truncate text-xs text-zinc-500">
                       {mcpDescriptor(server)}
+                    </div>
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+      </TabsPanel>
+      <TabsPanel value="subagents">
+        {subagentsLoading ? (
+          <div className="py-6 text-center text-xs text-zinc-500">
+            Loading...
+          </div>
+        ) : subagents.length === 0 ? (
+          <div className="py-6 text-center text-sm text-zinc-500">
+            No subagents configured. Add them in Settings.
+          </div>
+        ) : (
+          <div className="max-h-[55vh] space-y-1 overflow-y-auto py-2 pr-1">
+            {subagents.map((subagent) => (
+              <label
+                key={subagent.name}
+                className="flex items-start justify-between gap-3 rounded-md px-2 py-2 hover:bg-zinc-800/40"
+              >
+                <div className="flex items-start gap-2.5">
+                  <Checkbox
+                    checked={selectedSubagents.includes(subagent.name)}
+                    onCheckedChange={(checked) =>
+                      onToggleSubagent(subagent.name, checked)
+                    }
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <div className="font-mono text-xs text-zinc-300">
+                      {subagent.name}
+                    </div>
+                    <div className="truncate text-xs text-zinc-500">
+                      {subagent.description}
                     </div>
                   </div>
                 </div>
@@ -534,6 +583,9 @@ export function AgentsPanel() {
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
+  const [subagents, setSubagents] = useState<SubagentConfig[]>([]);
+  const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
+  const [subagentsLoading, setSubagentsLoading] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -567,6 +619,20 @@ export function AgentsPanel() {
     }
   }, []);
 
+  const refreshSubagents = useCallback(async (): Promise<SubagentConfig[]> => {
+    setSubagentsLoading(true);
+    try {
+      const list = await getSubagents();
+      setSubagents(list);
+      return list;
+    } catch (err) {
+      console.error(err);
+      return [];
+    } finally {
+      setSubagentsLoading(false);
+    }
+  }, []);
+
   const onTogglePlugin = useCallback((pluginName: string, checked: boolean) => {
     setSelectedPlugins((prev) =>
       checked
@@ -577,6 +643,19 @@ export function AgentsPanel() {
     );
   }, []);
 
+  const onToggleSubagent = useCallback(
+    (subagentName: string, checked: boolean) => {
+      setSelectedSubagents((prev) =>
+        checked
+          ? prev.includes(subagentName)
+            ? prev
+            : [...prev, subagentName]
+          : prev.filter((name) => name !== subagentName),
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
     if (dialogOpen) {
       setReminders([]);
@@ -584,9 +663,11 @@ export function AgentsPanel() {
         const list = await refreshMcpServers();
         const available = new Set(list.map((s) => s.name));
         setSelectedPlugins(DEFAULT_PLUGINS.filter((p) => available.has(p)));
+        setSelectedSubagents([]);
+        void refreshSubagents();
       })();
     }
-  }, [dialogOpen, refreshMcpServers]);
+  }, [dialogOpen, refreshMcpServers, refreshSubagents]);
 
   const onCreate = useCallback(async () => {
     if (!name.trim()) return;
@@ -600,10 +681,12 @@ export function AgentsPanel() {
         reminders?: string[];
         avatar: AgentAvatar;
         plugins: string[];
+        subagents: string[];
       } = {
         name: name.trim(),
         avatar: { character, color },
         plugins: selectedPlugins,
+        subagents: selectedSubagents,
       };
       if (role.trim()) payload.role = role.trim();
       if (model.trim()) payload.model = model.trim();
@@ -620,6 +703,7 @@ export function AgentsPanel() {
       setCharacter(AGENT_CHARACTERS[0]);
       setColor(AGENT_AVATAR_DEFAULT_COLOR);
       setSelectedPlugins([]);
+      setSelectedSubagents([]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -633,6 +717,7 @@ export function AgentsPanel() {
     character,
     color,
     selectedPlugins,
+    selectedSubagents,
     reminders,
     setSelectedAgentId,
   ]);
@@ -756,6 +841,7 @@ export function AgentsPanel() {
         instructions: editInstructions.trim() || undefined,
         avatar: { character: editCharacter, color: editColor },
         plugins: selectedPlugins,
+        subagents: selectedSubagents,
         reminders: editReminders,
       });
       setSaveStatus('saved');
@@ -774,6 +860,7 @@ export function AgentsPanel() {
     editCharacter,
     editColor,
     selectedPlugins,
+    selectedSubagents,
     editReminders,
   ]);
 
@@ -800,6 +887,7 @@ export function AgentsPanel() {
     editCharacter,
     editColor,
     selectedPlugins,
+    selectedSubagents,
     editReminders,
     editDialog,
     persistEdit,
@@ -825,10 +913,12 @@ export function AgentsPanel() {
       setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
       setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
       setSelectedPlugins(agent.plugins ?? []);
+      setSelectedSubagents(agent.subagents ?? []);
       setSaveStatus('idle');
       void refreshMcpServers();
+      void refreshSubagents();
     },
-    [refreshMcpServers],
+    [refreshMcpServers, refreshSubagents],
   );
 
   const closeEditDialog = useCallback(() => {
@@ -885,6 +975,10 @@ export function AgentsPanel() {
               mcpLoading={mcpLoading}
               selectedPlugins={selectedPlugins}
               onTogglePlugin={onTogglePlugin}
+              subagents={subagents}
+              subagentsLoading={subagentsLoading}
+              selectedSubagents={selectedSubagents}
+              onToggleSubagent={onToggleSubagent}
               reminders={reminders}
               onReminders={setReminders}
               footer={
@@ -1065,6 +1159,10 @@ export function AgentsPanel() {
             mcpLoading={mcpLoading}
             selectedPlugins={selectedPlugins}
             onTogglePlugin={onTogglePlugin}
+            subagents={subagents}
+            subagentsLoading={subagentsLoading}
+            selectedSubagents={selectedSubagents}
+            onToggleSubagent={onToggleSubagent}
             reminders={editReminders}
             onReminders={setEditReminders}
           />
