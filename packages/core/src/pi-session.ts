@@ -58,6 +58,13 @@ export interface PiSessionHandle {
   getMessages(): ChatMessage[];
 }
 
+export interface SubagentSessionHandle {
+  prompt(task: string, signal?: AbortSignal): Promise<string>;
+  abort(): Promise<void>;
+  subscribe(listener: (event: AgentSessionEvent) => void): () => void;
+  dispose(): void;
+}
+
 function toPiContent(
   message: ChatMessage,
 ): string | (TextContent | ImageContent)[] {
@@ -424,10 +431,7 @@ export async function createSubagentSession(
   parentModel: Model<Api>,
   allCustomTools: Tool[],
   contextFactory: (signal?: AbortSignal) => ToolContext,
-): Promise<{
-  prompt: (task: string, signal?: AbortSignal) => Promise<string>;
-  dispose: () => void;
-}> {
+): Promise<SubagentSessionHandle> {
   const model = config.model
     ? (resolveSubagentModel(parentModelRuntime, config.model) ?? parentModel)
     : parentModel;
@@ -481,6 +485,9 @@ export async function createSubagentSession(
       }
       return session.getLastAssistantText() ?? '(no response)';
     },
+    abort: (): Promise<void> => session.abort(),
+    subscribe: (listener: (event: AgentSessionEvent) => void): (() => void) =>
+      session.subscribe(listener),
     dispose: (): void => session.dispose(),
   };
 }

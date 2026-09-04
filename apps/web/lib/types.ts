@@ -169,3 +169,49 @@ export interface RunAutomationResponse {
   ok: boolean;
   summary?: string;
 }
+
+export type SubagentJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SubagentJsonObject
+  | SubagentJsonValue[];
+
+export interface SubagentJsonObject {
+  [key: string]: SubagentJsonValue;
+}
+
+export interface SubagentStreamEvent {
+  runId: string;
+  type:
+    | 'text'
+    | 'tool-call'
+    | 'tool-args'
+    | 'tool-call-end'
+    | 'tool-start'
+    | 'tool-end'
+    | 'done'
+    | 'settled';
+  delta?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: SubagentJsonObject;
+  result?: string;
+  images?: Array<{ data: string; mimeType: string }>;
+  isError?: boolean;
+}
+
+export interface ActiveSubagentRun {
+  runId: string;
+  name: string;
+  task: string;
+  status: 'running' | 'done' | 'stopped';
+  startedAt: number;
+  events: SubagentStreamEvent[];
+}
+
+export interface SubagentSnapshot {
+  type: 'snapshot';
+  runs: ActiveSubagentRun[];
+}

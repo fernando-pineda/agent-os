@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { AgentsPanel } from '@/components/agents-panel';
 import { Thread } from '@/components/assistant-ui/thread';
+import { SubagentPanel } from '@/components/subagent-panel';
 import { Button } from '@/components/ui/button';
 import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import { RuntimeProvider } from '@/lib/runtime';
@@ -94,6 +95,7 @@ export function ChatShell() {
           )}
         </div>
       </main>
+      <SubagentPanel agentId={selectedAgentId} />
     </div>
   );
 }

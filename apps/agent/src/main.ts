@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -28,6 +29,15 @@ import {
 } from './mcp.js';
 import { drainOutbox } from './outbox.js';
 import { createAgentServer, sendAgentMessageHttp } from './server.js';
+import {
+  getActiveRuns,
+  normalizePiEvent,
+  notifyRunDone,
+  registerRunAbort,
+  startRun,
+  storeEvent,
+  unregisterRunAbort,
+} from './subagent-broker.js';
 import { loadThread, uiMessagesToChat } from './thread.js';
 
 const rawAgentId = process.argv[2] ?? process.env.AGENT_ID;
@@ -476,29 +486,80 @@ function buildContext(
         throw new Error('Parent agent model is not available');
       }
 
-      const child = await createSubagentSession(
-        subagentConfig,
-        currentSession.session.modelRuntime,
-        parentModel,
-        buildTools(agent.sandboxed ?? false, homeDir, workspace),
-        (childSignal?: AbortSignal): ToolContext =>
-          buildContext(
-            agentId,
-            workspace,
-            homeDir,
-            childSignal,
-            agent,
-            turnState,
-            model,
-          ),
-      );
+      const runId = randomUUID();
+      startRun(runId, name, task);
+      let child: Awaited<ReturnType<typeof createSubagentSession>> | undefined;
+      let unsubscribe: (() => void) | undefined;
       try {
-        return await child.prompt(task, subagentSignal);
+        child = await createSubagentSession(
+          subagentConfig,
+          currentSession.session.modelRuntime,
+          parentModel,
+          buildTools(agent.sandboxed ?? false, homeDir, workspace),
+          (childSignal?: AbortSignal): ToolContext =>
+            buildContext(
+              agentId,
+              workspace,
+              homeDir,
+              childSignal,
+              agent,
+              turnState,
+              model,
+            ),
+        );
+        const childSession = child;
+        unsubscribe = childSession.subscribe((piEvent) => {
+          const normalized = normalizePiEvent(runId, piEvent);
+          if (normalized) {
+            storeEvent(runId, normalized);
+          }
+        });
+        registerRunAbort(runId, () => childSession.abort());
+        const run = getActiveRuns().find(
+          (activeRun) => activeRun.runId === runId,
+        );
+        if (run?.status === 'stopped') {
+          return stoppedSubagentResult(runId);
+        }
+        let output: string;
+        try {
+          output = await childSession.prompt(task, subagentSignal);
+        } catch (error) {
+          const stoppedRun = getActiveRuns().find(
+            (activeRun) => activeRun.runId === runId,
+          );
+          if (stoppedRun?.status !== 'stopped') {
+            throw error;
+          }
+          return stoppedSubagentResult(runId);
+        }
+        const completedRun = getActiveRuns().find(
+          (activeRun) => activeRun.runId === runId,
+        );
+        if (completedRun?.status === 'stopped') {
+          return stoppedSubagentResult(runId, output);
+        }
+        return output;
       } finally {
-        child.dispose();
+        notifyRunDone(runId);
+        unsubscribe?.();
+        unregisterRunAbort(runId);
+        child?.dispose();
       }
     },
   };
+}
+
+function stoppedSubagentResult(runId: string, output?: string): string {
+  if (output && output !== '(no response)') {
+    return `[Stopped by user] partial: ${output}`;
+  }
+  const partial = getActiveRuns()
+    .find((run) => run.runId === runId)
+    ?.events.filter((event) => event.type === 'text')
+    .map((event) => event.delta ?? '')
+    .join('');
+  return `[Stopped by user] partial: ${partial || '(no output)'}`;
 }
 
 function isSubagentConfig(value: object): value is SubagentConfig {

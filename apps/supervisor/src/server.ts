@@ -690,6 +690,87 @@ async function handle(
     return;
   }
 
+  const matchAgentSubagentsStream =
+    /^\/api\/agents\/([^/]+)\/subagents\/stream$/.exec(pathname);
+  if (matchAgentSubagentsStream && req.method === 'GET') {
+    const id = decodeURIComponent(matchAgentSubagentsStream[1]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const upstream = await fetch(
+        `http://localhost:${agentPort}/subagents/stream`,
+      );
+      if (!upstream.ok || !upstream.body) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Agent stream unavailable' }));
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      });
+      const reader = upstream.body.getReader();
+      const pump = async (): Promise<void> => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      };
+      req.on('close', () => {
+        void reader.cancel().catch(() => undefined);
+      });
+      await pump();
+    } catch (err) {
+      if (!res.headersSent) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } else {
+        res.end();
+      }
+    }
+    return;
+  }
+
+  const matchAgentSubagentStop =
+    /^\/api\/agents\/([^/]+)\/subagents\/([^/]+)\/stop$/.exec(pathname);
+  if (matchAgentSubagentStop && req.method === 'POST') {
+    const id = decodeURIComponent(matchAgentSubagentStop[1]!);
+    const runId = decodeURIComponent(matchAgentSubagentStop[2]!);
+    const agentPort = getAgentPort(registry, id);
+    if (!agentPort) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Agent not found' }));
+      return;
+    }
+    try {
+      const response = await fetch(
+        `http://localhost:${agentPort}/subagents/${runId}/stop`,
+        { method: 'POST' },
+      );
+      const body = await response.text();
+      res.writeHead(response.status, { 'Content-Type': 'application/json' });
+      res.end(body);
+    } catch (err) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+    return;
+  }
+
   const matchAgentChat = /^\/api\/agents\/([^/]+)\/chat$/.exec(pathname);
   if (matchAgentChat && req.method === 'POST') {
     const id = decodeURIComponent(matchAgentChat[1]!);

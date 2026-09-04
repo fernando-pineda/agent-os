@@ -370,3 +370,20 @@ export async function getAgentTools(agentId: string): Promise<AgentTool[]> {
   );
   return res.tools;
 }
+
+export function getSubagentStreamUrl(agentId: string): string {
+  return `${BASE}/api/agents/${encodeURIComponent(agentId)}/subagents/stream`;
+}
+
+export async function stopSubagent(
+  agentId: string,
+  runId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE}/api/agents/${encodeURIComponent(agentId)}/subagents/${encodeURIComponent(runId)}/stop`,
+    {
+      method: 'POST',
+    },
+  );
+  if (!res.ok) throw new Error(`Stop failed: HTTP ${res.status}`);
+}

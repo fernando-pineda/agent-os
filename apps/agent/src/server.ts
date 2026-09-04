@@ -24,6 +24,11 @@ import type { Automation, AutomationScheduler } from './automations.js';
 import { appendOutbox } from './outbox.js';
 import { findPortFor, myPort } from './registry.js';
 import {
+  type SubagentListener,
+  stopRun,
+  subscribe as subscribeToSubagents,
+} from './subagent-broker.js';
+import {
   loadThread,
   loadUsage,
   saveThread,
@@ -131,6 +136,28 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         res.write('retry: 2000\n\n');
         messageListeners.add(res);
         req.on('close', () => messageListeners.delete(res));
+        return;
+      }
+
+      if (method === 'GET' && url === '/subagents/stream') {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        res.write('retry: 2000\n\n');
+        const listener: SubagentListener = {
+          onSnapshot: (runs) => {
+            res.write(
+              `data: ${JSON.stringify({ type: 'snapshot', runs })}\n\n`,
+            );
+          },
+          onEvent: (event) => {
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+          },
+        };
+        const unsubscribe = subscribeToSubagents(listener);
+        res.on('close', unsubscribe);
         return;
       }
 
@@ -254,6 +281,14 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         void sessionHandle.abort().catch((err) => {
           console.error('Failed to abort agent session', err);
         });
+        res.writeHead(202, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      const subagentStopMatch = /^\/subagents\/([^/]+)\/stop$/.exec(url);
+      if (method === 'POST' && subagentStopMatch?.[1]) {
+        stopRun(subagentStopMatch[1]);
         res.writeHead(202, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
         return;

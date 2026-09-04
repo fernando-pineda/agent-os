@@ -8,6 +8,7 @@ export { type LoopEvent, runAgentLoop } from './loop.js';
 export {
   type PiSessionConfig,
   type PiSessionHandle,
+  type SubagentSessionHandle,
   createPiSession,
   type createSubagentSession as CreateSubagentSessionFn,
   createSubagentSession,
