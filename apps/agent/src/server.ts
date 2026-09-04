@@ -7,29 +7,20 @@ import { json } from 'node:stream/consumers';
 import type {
   AgentConfig,
   AgentStatus,
-  ChatImage,
   ChatMessage,
-  LLMClient,
-  LoopEvent,
+  PiSessionHandle,
   Tool,
   ToolContext,
-  ToolResult,
+  TurnSegment,
 } from '@agent-os/core';
-import { runAgentLoop } from '@agent-os/core';
 import {
   type AssistantStreamController,
   createAssistantStreamResponse,
+  type ToolCallStreamController,
   ToolResponse,
 } from 'assistant-stream';
-import type { ReadonlyJSONValue } from 'assistant-stream/utils';
 import { Cron } from 'croner';
 import type { Automation, AutomationScheduler } from './automations.js';
-import { loadMemoryIndex } from './compact.js';
-import {
-  readAgentConfigFresh,
-  readAgentReminders,
-  readGlobalReminders,
-} from './config.js';
 import { appendOutbox } from './outbox.js';
 import { findPortFor, myPort } from './registry.js';
 import {
@@ -49,7 +40,7 @@ export interface ServerDeps {
   model: string;
   provider?: 'fireworks' | 'zai';
   supportsVision?: boolean;
-  llm: LLMClient;
+  sessionHandle: PiSessionHandle;
   tools: Tool[];
   status: AgentStatus;
   currentTaskId?: string;
@@ -62,7 +53,10 @@ export interface ServerDeps {
   ) => Promise<string>;
   onMessagesPersisted?: (messages: UIMessage[]) => void;
   scheduler?: AutomationScheduler;
-  onPluginsReload?: () => Promise<Tool[]>;
+  onPluginsReload?: () => Promise<{
+    tools: Tool[];
+    sessionHandle: PiSessionHandle;
+  }>;
 }
 
 export interface AgentServer {
@@ -72,22 +66,6 @@ export interface AgentServer {
   setCurrentTaskId: (taskId: string | undefined) => void;
   isBusy: () => boolean;
   setScheduler: (scheduler: AutomationScheduler) => void;
-}
-
-interface ToolCallContext {
-  controller: ToolCallStreamController;
-  argsText: string;
-}
-
-interface TurnSegment {
-  kind: 'text' | 'tool';
-  text?: string;
-  toolCallId?: string;
-  toolName?: string;
-  args?: Record<string, unknown>;
-  result?: string;
-  isError?: boolean;
-  images?: ChatImage[];
 }
 
 interface RunControls {
@@ -106,9 +84,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   let status = deps.status;
   let currentTaskId = deps.currentTaskId;
   let running = false;
-  let runningController: AbortController | undefined;
+  let sessionHandle = deps.sessionHandle;
   let scheduler: AutomationScheduler | undefined = deps.scheduler;
-  let tools = deps.tools;
   const server = createServer();
   let _listenPort: number | undefined;
   const messageListeners = new Set<ServerResponse>();
@@ -180,7 +157,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         const messages = body.messages ?? [];
         const response = await handleChat(
           messages,
-          { ...deps, onMessagesPersisted: notifyMessages },
+          { ...deps, sessionHandle, onMessagesPersisted: notifyMessages },
           {
             setStatus,
             setCurrentTaskId,
@@ -243,7 +220,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         }
         const result = await handleInbox(
           inboxBody,
-          { ...deps, onMessagesPersisted: notifyMessages },
+          { ...deps, sessionHandle, onMessagesPersisted: notifyMessages },
           {
             setStatus,
             setCurrentTaskId,
@@ -257,9 +234,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
 
       // GET /tools - list all available tools (built-in + MCP)
       if (method === 'GET' && url === '/tools') {
-        const list = tools.map((t) => ({
-          name: t.spec.name,
-          description: t.spec.description,
+        const list = sessionHandle.session.getAllTools().map((tool) => ({
+          name: tool.name,
+          description: tool.description,
         }));
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ tools: list }));
@@ -268,12 +245,14 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
 
       // POST /abort - cancel the currently running turn
       if (method === 'POST' && url === '/abort') {
-        if (!running || !runningController) {
+        if (!running) {
           res.writeHead(409, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: 'No run in progress' }));
           return;
         }
-        runningController.abort();
+        void sessionHandle.abort().catch((err) => {
+          console.error('Failed to abort agent session', err);
+        });
         res.writeHead(202, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -288,10 +267,13 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
         }
         try {
           const next = await deps.onPluginsReload();
-          tools = next;
+          sessionHandle = next.sessionHandle;
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(
-            JSON.stringify({ ok: true, tools: next.map((t) => t.spec.name) }),
+            JSON.stringify({
+              ok: true,
+              tools: next.tools.map((t) => t.spec.name),
+            }),
           );
         } catch (err) {
           res.writeHead(500, { 'content-type': 'application/json' });
@@ -521,7 +503,9 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       return port;
     },
     async stop() {
-      runningController?.abort();
+      if (running) {
+        await sessionHandle.abort();
+      }
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
@@ -543,92 +527,27 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     controls.setCurrentTaskId(taskId);
     controls.setStatus('busy');
     controls.markRunning(true);
-    runningController = new AbortController();
-
     const chatMessages = uiMessagesToChat(messages);
-    // Drop images from messages sent to the LLM when the model cannot see
-    // them. The persisted thread keeps images regardless.
-    const supportsVision = serverDeps.supportsVision === true;
-    const llmMessages = supportsVision
-      ? chatMessages
-      : chatMessages.map((m) => {
-          if (!m.images) return m;
-          const rest: Omit<ChatMessage, 'images'> = {
-            role: m.role,
-            content: m.content,
-          };
-          if (m.toolCalls) rest.toolCalls = m.toolCalls;
-          if (m.toolCallId) rest.toolCallId = m.toolCallId;
-          return rest;
-        });
+    const promptText =
+      [...chatMessages].reverse().find((message) => message.role === 'user')
+        ?.content ?? '';
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
     let lastUsage: { inputTokens: number; outputTokens: number } | undefined;
-    const controller = runningController;
+    const controller = new AbortController();
 
     return createAssistantStreamResponse(
       async (streamController: AssistantStreamController) => {
-        try {
-          const memoryIndex = await loadMemoryIndex(serverDeps.homeDir);
-          const globalReminders = await readGlobalReminders();
-          const agentReminders = await readAgentReminders(serverDeps.agentId);
-          const freshAgent = await readAgentConfigFresh(serverDeps.agentId);
-          const agentName = freshAgent?.name;
-          const agentRole = freshAgent?.role ?? serverDeps.agent.role;
-          const agentInstructions =
-            freshAgent?.instructions ?? serverDeps.agent.instructions;
-          const reminders = [
-            ...(globalReminders ?? []),
-            ...(agentReminders ?? []),
-          ];
-          // Persist incrementally so a reload mid-run keeps the turn so far.
-          const persistPartial = (): Promise<void> =>
-            enqueuePersist(() => persistTurn(messages, segments, serverDeps));
-          await runAgentLoop({
-            llm: serverDeps.llm,
-            tools,
-            model: serverDeps.model,
-            ...(serverDeps.provider ? { provider: serverDeps.provider } : {}),
-            messages: llmMessages,
-            agentId: serverDeps.agentId,
-            ...(agentName ? { agentName } : {}),
-            ...(agentRole ? { role: agentRole } : {}),
-            ...(agentInstructions ? { instructions: agentInstructions } : {}),
-            ...(memoryIndex ? { memoryIndex } : {}),
-            ...(reminders.length > 0 ? { reminders } : {}),
-            buildContext: serverDeps.buildContext,
-            signal: controller.signal,
-            onEvent: (event: LoopEvent) => {
-              if (event.type === 'done' && event.usage) {
-                lastUsage = {
-                  inputTokens: event.usage.promptTokens ?? 0,
-                  outputTokens: event.usage.completionTokens ?? 0,
-                };
-              }
-              handleStreamEvent(
-                event,
-                streamController,
-                toolContexts,
-                segments,
-              );
-              // Persist incrementally on each completed segment boundary.
-              if (
-                event.type === 'tool-call' ||
-                event.type === 'tool-result' ||
-                event.type === 'done'
-              ) {
-                void persistPartial();
-              }
-            },
-          });
-          await enqueuePersist(() =>
-            persistTurn(messages, segments, serverDeps),
-          );
-          if (lastUsage) {
-            await saveUsage(serverDeps.homeDir, lastUsage);
-          }
-          // AI SDK data-stream needs explicit finish frames to complete.
-          const finishUsage = lastUsage ?? { inputTokens: 0, outputTokens: 0 };
+        let finishSent = false;
+        const persistPartial = (): Promise<void> =>
+          enqueuePersist(() => persistTurn(messages, segments, serverDeps));
+        const sendFinish = (): void => {
+          if (finishSent) return;
+          finishSent = true;
+          const finishUsage = lastUsage ?? {
+            inputTokens: 0,
+            outputTokens: 0,
+          };
           streamController.enqueue({
             type: 'step-finish',
             finishReason: 'stop',
@@ -640,11 +559,44 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
             finishReason: 'stop',
             usage: finishUsage,
           } as never);
+        };
+        const unsubscribe = serverDeps.sessionHandle.subscribe((event) => {
+          handleSessionEvent(
+            event,
+            streamController,
+            toolContexts,
+            segments,
+            (usage) => {
+              lastUsage = usage;
+            },
+            sendFinish,
+          );
+          if (
+            event.type === 'tool_execution_end' ||
+            event.type === 'agent_end'
+          ) {
+            void persistPartial().catch((err) => {
+              console.error('Failed to persist partial turn', err);
+            });
+          }
+        });
+        try {
+          await serverDeps.sessionHandle.prompt(promptText, controller.signal);
+          await enqueuePersist(() =>
+            persistTurn(messages, segments, serverDeps),
+          );
+          if (lastUsage) {
+            await saveUsage(serverDeps.homeDir, lastUsage);
+          }
+          sendFinish();
         } catch (err) {
           streamController.appendText(
             `\nError: ${err instanceof Error ? err.message : String(err)}`,
           );
+          sendFinish();
         } finally {
+          unsubscribe();
+          controller.abort();
           controls.setStatus('online');
           controls.setCurrentTaskId(undefined);
           controls.markRunning(false);
@@ -668,7 +620,6 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     controls.setCurrentTaskId(body.taskId);
     controls.setStatus('busy');
     controls.markRunning(true);
-    runningController = new AbortController();
 
     const prefix = body.inReplyTo ? 'Reply from agent' : 'Message from agent';
     const depth = body.replyDepth;
@@ -686,7 +637,7 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
       },
     ];
 
-    const controller = runningController;
+    const controller = new AbortController();
 
     void processInbox(
       {
@@ -720,47 +671,23 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   ): Promise<void> {
     const toolContexts = new Map<string, ToolCallContext>();
     const segments: TurnSegment[] = [];
+    let unsubscribe: (() => void) | undefined;
 
     try {
-      const globalReminders = await readGlobalReminders();
-      const agentReminders = await readAgentReminders(serverDeps.agentId);
-      const freshAgent = await readAgentConfigFresh(serverDeps.agentId);
-      const agentName = freshAgent?.name;
-      const agentRole = freshAgent?.role ?? serverDeps.agent.role;
-      const agentInstructions =
-        freshAgent?.instructions ?? serverDeps.agent.instructions;
-      const reminders = [...(globalReminders ?? []), ...(agentReminders ?? [])];
-      await runAgentLoop({
-        llm: serverDeps.llm,
-        tools,
-        model: serverDeps.model,
-        ...(serverDeps.provider ? { provider: serverDeps.provider } : {}),
-        messages: chatMessages,
-        agentId: serverDeps.agentId,
-        ...(agentName ? { agentName } : {}),
-        ...(agentRole ? { role: agentRole } : {}),
-        ...(agentInstructions ? { instructions: agentInstructions } : {}),
-        ...(reminders.length > 0 ? { reminders } : {}),
-        buildContext: (signal) => {
-          const ctx = serverDeps.buildContext(signal);
-          const overridden: ToolContext = {
-            ...ctx,
-            replyDepth: body.replyDepth,
-          };
-          if (body.atCap) {
-            overridden.sendAgentMessage = async () =>
-              'Reply limit reached for this exchange; not sent. Respond in plain text.';
-          }
-          return overridden;
-        },
-        signal: controller.signal,
-        onEvent: (event: LoopEvent) => {
-          handleStreamEvent(event, undefined, toolContexts, segments);
-        },
+      unsubscribe = serverDeps.sessionHandle.subscribe((event) => {
+        handleSessionEvent(
+          event,
+          undefined,
+          toolContexts,
+          segments,
+          undefined,
+          undefined,
+        );
       });
-      // Persist the inbound message so the UI can surface it and the model
-      // sees it in context after restarts. replyToAgentId marks the assistant
-      // messages as replies to the sender so the replied chip survives reloads.
+      await serverDeps.sessionHandle.prompt(
+        chatMessages[0]?.content ?? '',
+        controller.signal,
+      );
       const inbound: UIMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -783,6 +710,8 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
     } catch (err) {
       console.error('Inbox loop error', err);
     } finally {
+      unsubscribe?.();
+      controller.abort();
       controls.setStatus('online');
       controls.setCurrentTaskId(undefined);
       controls.markRunning(false);
@@ -790,70 +719,155 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
   }
 }
 
-import type { ToolCallStreamController } from 'assistant-stream';
+type PiSessionEvent = Parameters<
+  Parameters<PiSessionHandle['subscribe']>[0]
+>[0];
 
-function handleStreamEvent(
-  event: LoopEvent,
+interface ToolCallContext {
+  controller?: ToolCallStreamController;
+  argsText?: ToolCallStreamController['argsText'];
+}
+
+function handleSessionEvent(
+  event: PiSessionEvent,
   controller: AssistantStreamController | undefined,
   toolContexts: Map<string, ToolCallContext>,
   segments: TurnSegment[],
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void,
+  onAgentEnd?: () => void,
 ): void {
   const last = segments[segments.length - 1];
-  if (event.type === 'text-delta') {
-    controller?.appendText(event.delta);
-    if (last?.kind === 'text') {
-      last.text = (last.text ?? '') + event.delta;
-    } else if (last?.kind === 'tool') {
-      // Text after a tool continues the same message; keep it as a new
-      // text segment so the grouper appends it to the tool message.
-      segments.push({ kind: 'text', text: event.delta });
-    } else {
-      segments.push({ kind: 'text', text: event.delta });
+  if (event.type === 'message_update') {
+    const assistantEvent = event.assistantMessageEvent;
+    if (assistantEvent.type === 'text_delta') {
+      controller?.appendText(assistantEvent.delta);
+      if (last?.kind === 'text') {
+        last.text = (last.text ?? '') + assistantEvent.delta;
+      } else if (last?.kind === 'tool') {
+        segments.push({ kind: 'text', text: assistantEvent.delta });
+      } else {
+        segments.push({ kind: 'text', text: assistantEvent.delta });
+      }
+      return;
     }
-  } else if (event.type === 'tool-call') {
-    const call = event.call;
-    const toolController = controller?.addToolCallPart({
-      toolCallId: call.id,
-      toolName: call.name,
-      args: call.args as Record<string, ReadonlyJSONValue>,
-    });
-    if (toolController) {
-      toolContexts.set(call.id, { controller: toolController, argsText: '' });
+    if (assistantEvent.type === 'toolcall_start') {
+      const block = assistantEvent.partial.content[assistantEvent.contentIndex];
+      if (block?.type !== 'toolCall') return;
+      const toolController = controller?.addToolCallPart({
+        toolCallId: block.id,
+        toolName: block.name,
+        args: {},
+      });
+      toolContexts.set(block.id, {
+        ...(toolController ? { controller: toolController } : {}),
+        ...(toolController ? { argsText: toolController.argsText } : {}),
+      });
+      segments.push({
+        kind: 'tool',
+        toolCallId: block.id,
+        toolName: block.name,
+        args: block.arguments,
+      });
+      return;
     }
-    segments.push({
-      kind: 'tool',
-      toolCallId: call.id,
-      toolName: call.name,
-      args: call.args,
+    if (assistantEvent.type === 'toolcall_delta') {
+      const block = assistantEvent.partial.content[assistantEvent.contentIndex];
+      if (block?.type !== 'toolCall') return;
+      toolContexts.get(block.id)?.argsText?.append(assistantEvent.delta);
+      return;
+    }
+    if (assistantEvent.type === 'toolcall_end') {
+      const call = assistantEvent.toolCall;
+      toolContexts.get(call.id)?.argsText?.close();
+      const segment = segments.find(
+        (item) => item.kind === 'tool' && item.toolCallId === call.id,
+      );
+      if (segment) {
+        segment.toolName = call.name;
+        segment.args = call.arguments;
+      } else {
+        segments.push({
+          kind: 'tool',
+          toolCallId: call.id,
+          toolName: call.name,
+          args: call.arguments,
+        });
+      }
+      return;
+    }
+    if (assistantEvent.type === 'done') {
+      onUsage?.({
+        inputTokens: assistantEvent.message.usage.input,
+        outputTokens: assistantEvent.message.usage.output,
+      });
+    }
+    return;
+  }
+  if (event.type === 'message_end' && event.message.role === 'assistant') {
+    onUsage?.({
+      inputTokens: event.message.usage.input,
+      outputTokens: event.message.usage.output,
     });
-  } else if (event.type === 'tool-result') {
-    const result = event.result as ToolResult;
+    return;
+  }
+  if (event.type === 'tool_execution_end') {
+    const textParts: string[] = [];
+    const images: Array<{ data: string; mimeType: string }> = [];
+    for (const block of event.result.content) {
+      if (block.type === 'text') {
+        textParts.push(block.text);
+      } else if (block.type === 'image') {
+        images.push({ data: block.data, mimeType: block.mimeType });
+      }
+    }
+    const output = textParts.join('\n');
+    const isError = event.isError || event.result.details?.isError === true;
     const ctx = toolContexts.get(event.toolCallId);
-    if (ctx) {
+    if (ctx?.controller) {
       ctx.controller.setResponse(
         new ToolResponse({
-          result: result.output,
-          isError: result.ok === false,
+          result: output,
+          isError,
         }),
       );
     }
-    const seg = segments.find(
-      (s) => s.kind === 'tool' && s.toolCallId === event.toolCallId,
+    const segment = segments.find(
+      (item) => item.kind === 'tool' && item.toolCallId === event.toolCallId,
     );
-    if (seg) {
-      seg.result = result.output;
-      seg.isError = result.ok === false;
-      if (result.images?.length) {
-        seg.images = result.images;
-        for (const img of result.images) {
+    if (segment) {
+      segment.result = output;
+      segment.isError = isError;
+      if (images.length > 0) {
+        segment.images = images;
+        for (const image of images) {
           controller?.appendFile({
             type: 'file',
-            data: img.data,
-            mimeType: img.mimeType,
+            data: image.data,
+            mimeType: image.mimeType,
           });
         }
       }
+    } else {
+      segments.push({
+        kind: 'tool',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        result: output,
+        isError,
+        ...(images.length > 0 ? { images } : {}),
+      });
+      for (const image of images) {
+        controller?.appendFile({
+          type: 'file',
+          data: image.data,
+          mimeType: image.mimeType,
+        });
+      }
     }
+    return;
+  }
+  if (event.type === 'agent_end') {
+    onAgentEnd?.();
   }
 }
 

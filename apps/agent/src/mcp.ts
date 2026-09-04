@@ -4,6 +4,7 @@ import type {
   ToolContext,
   ToolResult,
 } from '@agent-os/core';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   StdioClientTransport,
@@ -14,6 +15,26 @@ import {
   type StreamableHTTPClientTransportOptions,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
+// Local type definitions for pi-mcp-adapter. The package exports .ts files
+// at its root entry which tsc cannot compile without allowImportingTsExtensions.
+// We type the API surface locally and use a dynamic import at runtime (tsx
+// loader handles .ts). Types verified against pi-mcp-adapter@2.32.1.
+
+interface ServerEntry {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  lifecycle?: 'lazy' | 'eager' | 'keep-alive' | 'lazy-keep-alive';
+}
+
+interface McpConfig {
+  mcpServers: Record<string, ServerEntry>;
+}
 
 export interface McpConnection {
   name: string;
@@ -22,6 +43,95 @@ export interface McpConnection {
 }
 
 const CONNECT_TIMEOUT_MS = 10_000;
+
+type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
+type CreateMcpAdapterFn = (options?: {
+  config?: McpConfig;
+  configPath?: string;
+}) => ExtensionFactory;
+
+let createMcpAdapter: CreateMcpAdapterFn | undefined;
+
+// Variable path prevents tsc from statically resolving the .ts root entry.
+// tsx handles .ts at runtime. Types are defined locally above.
+const MCP_ADAPTER_MODULE = 'pi-mcp-adapter';
+
+async function getCreateMcpAdapter(): Promise<CreateMcpAdapterFn> {
+  const loaded = createMcpAdapter;
+  if (loaded) return loaded;
+
+  const module = (await import(MCP_ADAPTER_MODULE)) as {
+    createMcpAdapter: CreateMcpAdapterFn;
+  };
+  createMcpAdapter = module.createMcpAdapter;
+  return module.createMcpAdapter;
+}
+
+function selectServers(
+  servers: McpServerConfig[],
+  activeNames: string[],
+): McpServerConfig[] {
+  const byName = new Map(servers.map((server) => [server.name, server]));
+  const selected: McpServerConfig[] = [];
+
+  for (const name of activeNames) {
+    const server = byName.get(name);
+    if (server) {
+      selected.push(server);
+    } else {
+      console.warn(`MCP server "${name}" not found in config, skipping`);
+    }
+  }
+
+  return selected;
+}
+
+function buildServerEntry(server: McpServerConfig): ServerEntry {
+  const lifecycle: Pick<ServerEntry, 'lifecycle'> = { lifecycle: 'lazy' };
+
+  if (server.transport === 'http') {
+    return {
+      ...lifecycle,
+      ...(server.url !== undefined ? { url: server.url } : {}),
+      ...(server.headers !== undefined ? { headers: server.headers } : {}),
+    };
+  }
+
+  return {
+    ...lifecycle,
+    ...(server.command !== undefined ? { command: server.command } : {}),
+    ...(server.args !== undefined ? { args: server.args } : {}),
+    ...(server.env !== undefined ? { env: server.env } : {}),
+  };
+}
+
+function buildMcpConfig(
+  servers: McpServerConfig[],
+  activeNames: string[],
+): McpConfig {
+  const mcpServers: Record<string, ServerEntry> = {};
+
+  for (const server of selectServers(servers, activeNames)) {
+    mcpServers[server.name] = buildServerEntry(server);
+  }
+
+  return { mcpServers };
+}
+
+type ToolArguments = Parameters<Tool['execute']>[0];
+type ToolParameters = Tool['spec']['parameters'];
+
+export function rebuildMcpForSession(
+  mcpServers: McpServerConfig[],
+  plugins: string[],
+): ExtensionFactory {
+  const config = buildMcpConfig(mcpServers, plugins);
+
+  return async (pi) => {
+    const adapter = await getCreateMcpAdapter();
+    await adapter({ config })(pi);
+  };
+}
 
 function buildStdioParams(server: McpServerConfig): StdioServerParameters {
   const params: StdioServerParameters = {
@@ -55,32 +165,34 @@ function withTimeout<T>(
       );
     }, ms);
     promise.then(
-      (val) => {
+      (value) => {
         clearTimeout(timer);
-        resolve(val);
+        resolve(value);
       },
-      (err) => {
+      (error: Error) => {
         clearTimeout(timer);
-        reject(err);
+        reject(error);
       },
     );
   });
 }
 
-function contentToText(content: unknown): string {
-  if (!Array.isArray(content)) return '';
+function contentToText(content: CallToolResult['content']): string {
   const parts: string[] = [];
   for (const block of content) {
-    if (
-      block !== null &&
-      typeof block === 'object' &&
-      'type' in block &&
-      (block as Record<string, unknown>).type === 'text'
-    ) {
-      parts.push(String((block as Record<string, unknown>).text));
+    if (block.type === 'text') {
+      parts.push(block.text);
     }
   }
   return parts.join('\n');
+}
+
+type ClientCallToolResult = Awaited<ReturnType<Client['callTool']>>;
+
+function isCallToolResult(
+  result: ClientCallToolResult,
+): result is CallToolResult {
+  return 'content' in result;
 }
 
 function wrapTool(
@@ -88,7 +200,7 @@ function wrapTool(
   client: Client,
   name: string,
   description: string,
-  inputSchema: Record<string, unknown>,
+  inputSchema: ToolParameters,
 ): Tool {
   const spec = {
     name: `${serverName}__${name}`,
@@ -97,12 +209,16 @@ function wrapTool(
   };
   return {
     spec,
-    async execute(
-      args: Record<string, unknown>,
-      _ctx: ToolContext,
-    ): Promise<ToolResult> {
+    async execute(args: ToolArguments, _ctx: ToolContext): Promise<ToolResult> {
       try {
         const result = await client.callTool({ name, arguments: args });
+        if (!isCallToolResult(result)) {
+          return {
+            ok: false,
+            output: `MCP tool ${name} returned an unsupported task result`,
+            isError: true,
+          };
+        }
         if (result.isError) {
           return {
             ok: false,
@@ -113,27 +229,23 @@ function wrapTool(
           };
         }
         return { ok: true, output: contentToText(result.content) };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, output: `MCP tool ${name} failed: ${msg}` };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, output: `MCP tool ${name} failed: ${message}` };
       }
     },
   };
 }
 
 async function connectOne(server: McpServerConfig): Promise<McpConnection> {
-  // Cast through unknown: the MCP SDK's Transport optional properties
-  // are incompatible with exactOptionalPropertyTypes.
   let transport: Transport;
   if (server.transport === 'http') {
     transport = new StreamableHTTPClientTransport(
       new URL(server.url ?? ''),
       buildHttpOpts(server),
-    ) as unknown as Transport;
+    ) as Transport;
   } else {
-    transport = new StdioClientTransport(
-      buildStdioParams(server),
-    ) as unknown as Transport;
+    transport = new StdioClientTransport(buildStdioParams(server)) as Transport;
   }
 
   const client = new Client(
@@ -141,70 +253,98 @@ async function connectOne(server: McpServerConfig): Promise<McpConnection> {
     { capabilities: {} },
   );
 
-  await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, server.name);
-  const { tools } = await withTimeout(
-    client.listTools(),
-    CONNECT_TIMEOUT_MS,
-    server.name,
-  );
-
-  const wrapped: Tool[] = tools.map((t) =>
-    wrapTool(
+  try {
+    await withTimeout(
+      client.connect(transport),
+      CONNECT_TIMEOUT_MS,
       server.name,
-      client,
-      t.name,
-      t.description ?? '',
-      t.inputSchema as Record<string, unknown>,
-    ),
-  );
+    );
+    const { tools } = await withTimeout(
+      client.listTools(),
+      CONNECT_TIMEOUT_MS,
+      server.name,
+    );
 
-  return {
-    name: server.name,
-    tools: wrapped,
-    async close() {
+    const wrapped: Tool[] = tools.map((tool) =>
+      wrapTool(
+        server.name,
+        client,
+        tool.name,
+        tool.description ?? '',
+        tool.inputSchema,
+      ),
+    );
+
+    return {
+      name: server.name,
+      tools: wrapped,
+      async close() {
+        await client.close();
+      },
+    };
+  } catch (error) {
+    try {
       await client.close();
-    },
-  };
+    } catch (closeError) {
+      const message =
+        closeError instanceof Error ? closeError.message : String(closeError);
+      console.warn(`MCP server "${server.name}" cleanup failed: ${message}`);
+    }
+    throw error;
+  }
 }
 
-export async function connectMcpServers(
-  servers: McpServerConfig[],
-  activeNames: string[],
+export async function rebuildAutomationMcp(
+  mcpServers: McpServerConfig[],
+  plugins: string[],
 ): Promise<McpConnection[]> {
-  const configs = activeNames
-    .map((name) => servers.find((s) => s.name === name))
-    .filter((s): s is McpServerConfig => s !== undefined);
-
-  for (const name of activeNames) {
-    if (!configs.some((s) => s.name === name)) {
-      console.warn(`MCP server "${name}" not found in config, skipping`);
-    }
-  }
-
-  const results = await Promise.allSettled(configs.map((s) => connectOne(s)));
-
+  const configs = selectServers(mcpServers, plugins);
+  const results = await Promise.allSettled(
+    configs.map((server) => connectOne(server)),
+  );
   const connections: McpConnection[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result && result.status === 'fulfilled') {
+
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    if (result?.status === 'fulfilled') {
       connections.push(result.value);
-    } else if (result && result.status === 'rejected') {
-      const config = configs[i];
-      if (config) {
-        const msg =
-          result.reason instanceof Error
-            ? result.reason.message
-            : String(result.reason);
-        console.warn(`MCP server "${config.name}" failed to connect: ${msg}`);
-      }
+      continue;
+    }
+
+    const config = configs[index];
+    if (config && result?.status === 'rejected') {
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      console.warn(`MCP server "${config.name}" failed to connect: ${message}`);
     }
   }
 
   return connections;
 }
 
-export async function closeMcpConnections(
+export async function closeAutomationMcp(
   connections: McpConnection[],
 ): Promise<void> {
-  await Promise.allSettled(connections.map((c) => c.close()));
+  const results = await Promise.allSettled(
+    connections.map((connection) => connection.close()),
+  );
+
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    if (result?.status === 'rejected') {
+      const connection = connections[index];
+      const message =
+        result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+      console.warn(
+        `MCP server "${connection?.name ?? 'unknown'}" cleanup failed: ${message}`,
+      );
+    }
+  }
 }
+
+export const connectMcpServers = rebuildAutomationMcp;
+export const closeMcpConnections = closeAutomationMcp;

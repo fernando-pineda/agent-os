@@ -16,9 +16,12 @@
     "@agent-os/core": "workspace:*",
     "@agent-os/sandbox": "workspace:*",
     "@agent-os/tools": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.84.4",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "assistant-stream": "0.3.40",
-    "croner": "^10.0.1"
+    "croner": "^10.0.1",
+    "pi-mcp-adapter": "2.32.1",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22",

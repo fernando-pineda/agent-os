@@ -102,6 +102,18 @@ export interface ToolCall {
   args: Record<string, unknown>;
 }
 
+export interface TurnSegment {
+  kind: 'text' | 'tool';
+  text?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  isError?: boolean;
+  images?: ChatImage[];
+}
+
+/** @deprecated Use AgentSessionEvent from the Pi session adapter. */
 export type LLMEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'tool-call'; call: ToolCall }
@@ -111,6 +123,7 @@ export type LLMEvent =
     }
   | { type: 'error'; error: string };
 
+/** @deprecated Use PiSessionConfig from the Pi session adapter. */
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
@@ -118,6 +131,7 @@ export interface ChatRequest {
   temperature?: number;
 }
 
+/** @deprecated Use PiSessionHandle from the Pi session adapter. */
 export interface LLMClient {
   stream(req: ChatRequest, signal?: AbortSignal): AsyncIterable<LLMEvent>;
 }

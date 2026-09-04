@@ -4,8 +4,11 @@ export {
   compactMessages,
   renderMemoryIndex,
 } from './compact.js';
-export { FireworksLLMClient } from './fireworks.js';
 export { type LoopEvent, runAgentLoop } from './loop.js';
-export { MockLLMClient } from './mock.js';
+export {
+  type PiSessionConfig,
+  type PiSessionHandle,
+  createPiSession,
+} from './pi-session.js';
+export { toolToPiDefinition } from './tool-adapter.js';
 export * from './types.js';
-export { ZaiLLMClient } from './zai.js';
