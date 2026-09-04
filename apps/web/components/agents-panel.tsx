@@ -121,12 +121,16 @@ function AgentForm({
   color,
   instructions,
   agentId,
+  sandboxType,
+  kasmImage,
   onName,
   onRole,
   onModel,
   onCharacter,
   onColor,
   onInstructions,
+  onSandboxType,
+  onKasmImage,
   models,
   loadingModels,
   mcpServers,
@@ -148,12 +152,16 @@ function AgentForm({
   color: string;
   instructions: string;
   agentId?: string;
+  sandboxType: 'host' | 'docker-desktop';
+  kasmImage: string;
   onName: (v: string) => void;
   onRole: (v: string) => void;
   onModel: (v: string) => void;
-  onCharacter: (v: string) => void;
-  onColor: (v: string) => void;
+  onCharacter: (c: string) => void;
+  onColor: (c: string) => void;
   onInstructions: (v: string) => void;
+  onSandboxType: (v: 'host' | 'docker-desktop') => void;
+  onKasmImage: (v: string) => void;
   models: ModelItem[];
   loadingModels: boolean;
   mcpServers: McpServerConfig[];
@@ -172,7 +180,6 @@ function AgentForm({
     <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col">
       <TabsList>
         <TabsTab value="general">General</TabsTab>
-        <TabsTab value="instructions">Instructions & roles</TabsTab>
         <TabsTab value="automations">Automations</TabsTab>
         <TabsTab value="plugins">Active plugins</TabsTab>
         <TabsTab value="subagents">Subagents</TabsTab>
@@ -180,7 +187,7 @@ function AgentForm({
         <TabsIndicator />
       </TabsList>
       <TabsPanel value="general">
-        <div className="space-y-3 overflow-y-auto p-0.5">
+        <div className="space-y-4 overflow-y-auto p-0.5">
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Name</label>
             <Input
@@ -204,6 +211,71 @@ function AgentForm({
             onCharacter={onCharacter}
             onColor={onColor}
           />
+          {/* Environment */}
+          <div>
+            <label className="mb-1 block text-xs text-zinc-400">
+              Environment
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onSandboxType('host')}
+                className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                  sandboxType === 'host'
+                    ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                    : 'border-zinc-800 bg-zinc-950 text-zinc-500 hover:border-zinc-700'
+                }`}
+              >
+                Host (macOS)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSandboxType('docker-desktop')}
+                className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                  sandboxType === 'docker-desktop'
+                    ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                    : 'border-zinc-800 bg-zinc-950 text-zinc-500 hover:border-zinc-700'
+                }`}
+              >
+                Docker desktop
+              </button>
+            </div>
+            {sandboxType === 'docker-desktop' && (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Agent runs in an isolated Linux desktop with VNC streaming.
+                Requires Docker Desktop running.
+              </p>
+            )}
+          </div>
+          {/* Instructions & roles section */}
+          <div className="border-t border-zinc-800 pt-3">
+            <h3 className="mb-2 text-xs font-medium text-zinc-400">
+              Instructions &amp; roles
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">Role</label>
+                <Input
+                  value={role}
+                  onChange={(e) => onRole(e.target.value)}
+                  placeholder="planner"
+                  className="border-zinc-800 bg-zinc-950 text-zinc-100"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">
+                  Instructions
+                </label>
+                <textarea
+                  value={instructions}
+                  onChange={(e) => onInstructions(e.target.value)}
+                  placeholder="Extra instructions for this agent, injected into its system prompt."
+                  rows={6}
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </TabsPanel>
       <TabsPanel value="instructions">
@@ -579,6 +651,12 @@ export function AgentsPanel() {
   const [reminders, setReminders] = useState<string[]>([]);
   const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
   const [color, setColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
+  const [sandboxType, setSandboxType] = useState<'host' | 'docker-desktop'>(
+    'host',
+  );
+  const [kasmImage, setKasmImage] = useState(
+    'kasmweb/ubuntu-jammy-desktop:1.19.0',
+  );
   const [creating, setCreating] = useState(false);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
@@ -677,6 +755,8 @@ export function AgentsPanel() {
         name: string;
         role?: string;
         model?: string;
+        sandboxType?: 'host' | 'docker-desktop';
+        kasmImage?: string;
         instructions?: string;
         reminders?: string[];
         avatar: AgentAvatar;
@@ -690,6 +770,10 @@ export function AgentsPanel() {
       };
       if (role.trim()) payload.role = role.trim();
       if (model.trim()) payload.model = model.trim();
+      if (sandboxType === 'docker-desktop') {
+        payload.sandboxType = 'docker-desktop';
+        payload.kasmImage = kasmImage;
+      }
       if (instructions.trim()) payload.instructions = instructions.trim();
       if (reminders.length > 0) payload.reminders = reminders;
       const agent = await createAgent(payload);
@@ -823,6 +907,12 @@ export function AgentsPanel() {
     AGENT_CHARACTERS[0],
   );
   const [editColor, setEditColor] = useState(AGENT_AVATAR_DEFAULT_COLOR);
+  const [editSandboxType, setEditSandboxType] = useState<
+    'host' | 'docker-desktop'
+  >('host');
+  const [editKasmImage, setEditKasmImage] = useState(
+    'kasmweb/ubuntu-jammy-desktop:1.19.0',
+  );
   const [saveStatus, setSaveStatus] = useState<
     'idle' | 'pending' | 'saving' | 'saved' | 'error'
   >('idle');
@@ -838,6 +928,10 @@ export function AgentsPanel() {
         name: editName.trim() || undefined,
         role: editRole.trim() || undefined,
         model: editModel.trim() || undefined,
+        sandboxType: editSandboxType,
+        ...(editSandboxType === 'docker-desktop'
+          ? { kasmImage: editKasmImage }
+          : {}),
         instructions: editInstructions.trim() || undefined,
         avatar: { character: editCharacter, color: editColor },
         plugins: selectedPlugins,
@@ -912,6 +1006,10 @@ export function AgentsPanel() {
       setEditModel(agent.model);
       setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
       setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
+      setEditSandboxType(agent.sandboxType ?? 'host');
+      setEditKasmImage(
+        agent.kasmImage ?? 'kasmweb/ubuntu-jammy-desktop:1.19.0',
+      );
       setSelectedPlugins(agent.plugins ?? []);
       setSelectedSubagents(agent.subagents ?? []);
       setSaveStatus('idle');
@@ -963,12 +1061,16 @@ export function AgentsPanel() {
               character={character}
               color={color}
               instructions={instructions}
+              sandboxType={sandboxType}
+              kasmImage={kasmImage}
               onName={setName}
               onRole={setRole}
               onModel={setModel}
               onCharacter={setCharacter}
               onColor={setColor}
               onInstructions={setInstructions}
+              onSandboxType={setSandboxType}
+              onKasmImage={setKasmImage}
               models={models}
               loadingModels={loadingModels}
               mcpServers={mcpServers}
@@ -1147,12 +1249,16 @@ export function AgentsPanel() {
             color={editColor}
             instructions={editInstructions}
             agentId={editDialog?.id}
+            sandboxType={editSandboxType}
+            kasmImage={editKasmImage}
             onName={setEditName}
             onRole={setEditRole}
             onModel={setEditModel}
             onCharacter={setEditCharacter}
             onColor={setEditColor}
             onInstructions={setEditInstructions}
+            onSandboxType={setEditSandboxType}
+            onKasmImage={setEditKasmImage}
             models={models}
             loadingModels={loadingModels}
             mcpServers={mcpServers}

@@ -29,6 +29,8 @@ export interface AgentInfo {
   subagents?: string[];
   reminders?: string[];
   desktopPort?: number;
+  sandboxType?: 'host' | 'docker-desktop';
+  kasmImage?: string;
 }
 
 export interface OnboardingStatus {
@@ -62,6 +64,8 @@ export interface CreateAgentPayload {
   workspace?: string;
   role?: string;
   model?: string;
+  sandboxType?: 'host' | 'docker-desktop';
+  kasmImage?: string;
   avatar?: AgentAvatar;
   plugins?: string[];
   subagents?: string[];
@@ -74,6 +78,8 @@ export interface UpdateAgentPayload {
   workspace?: string;
   role?: string;
   model?: string;
+  sandboxType?: 'host' | 'docker-desktop';
+  kasmImage?: string;
   sandboxed?: boolean;
   avatar?: AgentAvatar;
   instructions?: string;

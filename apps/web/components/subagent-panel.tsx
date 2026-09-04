@@ -549,32 +549,46 @@ export function SubagentPanel({
     [runs, selectedRunId],
   );
 
-  if (runs.length === 0) return null;
+  if (runs.length === 0) {
+    return (
+      <aside className="hidden w-56 flex-shrink-0 py-2 md:flex md:flex-col">
+        <div className="mx-2 rounded-lg border border-zinc-800">
+          <div className="border-b border-zinc-800 px-3 py-2">
+            <div className="text-xs font-medium text-zinc-300">Subagents</div>
+          </div>
+          <div className="px-3 py-4 text-center text-[0.65rem] text-zinc-600">
+            No active subagents
+          </div>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <>
-      {/* Single floating card - top right */}
-      <div className="fixed right-4 top-4 z-40 w-56 rounded-lg border border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
-        <div className="border-b border-zinc-800 px-3 py-2">
-          <div className="text-xs font-medium text-zinc-300">Subagents</div>
-        </div>
-        {streamError && (
-          <div className="border-b border-red-900/50 bg-red-950/30 px-2.5 py-1.5 text-[0.65rem] text-red-300">
-            {streamError}
+      <aside className="hidden w-56 flex-shrink-0 py-2 md:flex md:flex-col">
+        <div className="mx-2 rounded-lg border border-zinc-800">
+          <div className="border-b border-zinc-800 px-3 py-2">
+            <div className="text-xs font-medium text-zinc-300">Subagents</div>
           </div>
-        )}
-        <div className="flex flex-col gap-px p-1.5">
-          {runs.map((run) => (
-            <MiniRunCard
-              key={run.runId}
-              run={run}
-              stopping={stoppingRunId === run.runId}
-              onOpen={() => setSelectedRunId(run.runId)}
-              onStop={() => void onStop(run.runId)}
-            />
-          ))}
+          {streamError && (
+            <div className="border-b border-red-900/50 px-2.5 py-1.5 text-[0.65rem] text-red-300">
+              {streamError}
+            </div>
+          )}
+          <div className="flex flex-col gap-px p-1.5">
+            {runs.map((run) => (
+              <MiniRunCard
+                key={run.runId}
+                run={run}
+                stopping={stoppingRunId === run.runId}
+                onOpen={() => setSelectedRunId(run.runId)}
+                onStop={() => void onStop(run.runId)}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      </aside>
 
       {/* Read-only detail dialog */}
       <Dialog
