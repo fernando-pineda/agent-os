@@ -88,24 +88,16 @@ export async function listModels(): Promise<{
   try {
     const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
     const modelRuntime = await ModelRuntime.create();
-    const providers = modelRuntime.getProviders();
-    const entries: ModelEntry[] = [];
-
-    for (const provider of providers) {
-      const models = modelRuntime.getModels(provider.id);
-      for (const model of models) {
-        entries.push({
-          id: `${provider.id}/${model.id}`,
-          supportsTools: true,
-          ...(model.input?.includes('image') ? { supportsVision: true } : {}),
-          provider: provider.id,
-          name: model.name,
-          ...(model.contextWindow
-            ? { contextWindow: model.contextWindow }
-            : {}),
-        });
-      }
-    }
+    // Only list models from providers with valid credentials.
+    const available = await modelRuntime.getAvailable();
+    const entries: ModelEntry[] = available.map((model) => ({
+      id: `${model.provider}/${model.id}`,
+      supportsTools: true,
+      ...(model.input?.includes('image') ? { supportsVision: true } : {}),
+      provider: model.provider,
+      name: model.name,
+      ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+    }));
 
     modelCache = { fetchedAt: now, models: entries };
     return { models: entries };
