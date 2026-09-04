@@ -261,7 +261,6 @@ async function createSession(
     homeDir,
     cwd: homeDir,
     tools,
-    ...(containerName ? { excludeTools: ['bash'] } : {}),
     agentId: config.agent.id,
     ...(agent.name ? { agentName: agent.name } : {}),
     ...(agent.role ? { role: agent.role } : {}),
@@ -812,10 +811,13 @@ function createContainerScreenshotTool(containerName: string): Tool {
         };
       }
 
+      // Use `docker exec cat` instead of `docker cp -` which streams a
+      // TAR archive, not raw file bytes.
       const copied = await runContainerBinaryCommand([
-        'cp',
-        `${containerName}:/tmp/shot.png`,
-        '-',
+        'exec',
+        containerName,
+        'cat',
+        '/tmp/shot.png',
       ]);
       if (copied.error !== null) {
         return {

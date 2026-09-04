@@ -14,7 +14,7 @@ const HEALTH_TIMEOUT_MS = 1000;
 export interface StatusTracker {
   getAgents(): AgentInfo[];
   getAgent(id: string): AgentInfo | undefined;
-  refreshAgent(config: AgentConfig): void;
+  refreshAgent(config: AgentConfig): Promise<void>;
   updateStatus(id: string, status: AgentStatus, currentTaskId?: string): void;
   removeAgent(id: string): void;
   setDefaultModel(model: string): void;
@@ -74,9 +74,12 @@ export class StatusTrackerImpl implements StatusTracker {
   }
 
   // Rebuild one agent from its config (PATCH path), keep live status.
-  refreshAgent(config: AgentConfig): void {
+  async refreshAgent(config: AgentConfig): Promise<void> {
     const existing = this.info.get(config.id);
     const status = existing?.status ?? 'stopped';
+    // Reload registry from disk so vncPort/containerId changes from
+    // start/stop are reflected, not just the tracker's stale copy.
+    this.registry = await loadRegistry();
     const entry = this.registry.agents.find(
       (candidate) => candidate.id === config.id,
     );
@@ -128,6 +131,9 @@ export class StatusTrackerImpl implements StatusTracker {
 
   private async tick(): Promise<void> {
     if (this.stopped) return;
+    // Reload registry from disk so spawn/stop changes to vncPort and
+    // containerId are visible, not just the tracker's in-memory copy.
+    this.registry = await loadRegistry();
     const configs = await listAgentConfigs();
     let changed = false;
     for (const config of configs) {

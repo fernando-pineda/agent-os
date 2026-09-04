@@ -453,7 +453,7 @@ async function handle(
     // Push the new agent to SSE subscribers immediately.
     if (result.agent) {
       const createdConfig = await readAgentConfig(result.agent.id);
-      if (createdConfig) statusTracker.refreshAgent(createdConfig);
+      if (createdConfig) await statusTracker.refreshAgent(createdConfig);
     }
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result.agent));
@@ -515,7 +515,7 @@ async function handle(
         res.end(JSON.stringify({ error: 'Agent not found' }));
         return;
       }
-      statusTracker.refreshAgent(updated);
+      await statusTracker.refreshAgent(updated);
       // If plugins changed and the agent is running, hot-reload its MCPs.
       if (patch.plugins !== undefined) {
         const port = getAgentPort(registry, id);
@@ -634,7 +634,6 @@ async function handle(
         url: `https://localhost:${entry.vncPort}`,
         port: entry.vncPort,
         status: entry.status === 'stopped' ? 'stopped' : 'running',
-        password: entry.vncPassword,
       }),
     );
     return;

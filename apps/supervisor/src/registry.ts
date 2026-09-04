@@ -841,7 +841,7 @@ async function spawnDockerContainer(
       '--rm',
       '--shm-size=512m',
       '-p',
-      `${vncPort}:6901`,
+      `127.0.0.1:${vncPort}:6901`,
       '-e',
       `VNC_PW=${vncPassword}`,
       '--name',
