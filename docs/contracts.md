@@ -9,7 +9,7 @@ These contracts are frozen before the build swarm. All builders must implement a
 - Runtime state root (supervisor side, human user): `~/.agent-os/`
   - `~/.agent-os/config.json` global onboarding config
   - `~/.agent-os/agents/<id>/config.json` supervisor-owned registry copy of per-agent config
-- Agent side: macOS user `agentos-<id>`, home `/Users/agentos-<id>/` (the real isolated workspace; cwd of everything the agent does)
+- Agent side: dev-home at `~/.agent-os/dev-homes/<id>/` (cwd of everything the agent does, set via `AGENT_OS_HOME`)
 
 ## Ports
 
@@ -65,7 +65,7 @@ interface AgentConfig {
 
 ## Per-agent git isolation
 
-Each agent is its own macOS user, so git identity, credentials, SSH keys and keychain are isolated by the OS. AgentConfig.git values are written into the agent user's home at provisioning time. No shared git state across agents or with the human account.
+Each agent has its own dev-home, so git identity, credentials, and SSH keys are isolated by directory. AgentConfig.git values are written into the agent's dev-home at provisioning time.
 
 ## Agent status enum
 
@@ -155,7 +155,7 @@ interface ToolResult {
 interface ToolContext {
   agentId: string;
   workspace: string; // resolved workspace name
-  homeDir: string;   // /Users/agentos-<workspace>
+  homeDir: string;   // ~/.agent-os/dev-homes/<workspace>
   signal?: AbortSignal;
 }
 
@@ -278,15 +278,15 @@ type AgentCommand = { type: "cancel"; taskId: string };
 
 ## Isolation model (hard requirement)
 
-Unit of isolation is the WORKSPACE, backed by a real macOS user `agentos-<workspace>` (created via sysadminctl, dscl fallback), home `/Users/agentos-<workspace>`. Everything agents touch lives in that home: clones, git config, credentials, keychain, browser profile (Playwright userDataDir), tmux server. Workspaces cannot read each other's homes nor the human's beyond macOS defaults.
+Unit of isolation is the WORKSPACE, backed by a dev-home at `~/.agent-os/dev-homes/<workspace>`. Everything agents touch lives in that home: clones, git config, credentials, browser profile (Playwright userDataDir), tmux server.
 
 - Default: agent without `workspace` gets its own workspace equal to its id (full isolation).
-- Team: agents sharing `workspace: "<name>"` run as the same macOS user, share home/git/browser, differentiate by `role` (own system prompt) and coordinate via their personal inboxes.
-- Supervisor runs as the human user, keeps only metadata in `~/.agent-os/`. Agent-private files stay in the workspace user home.
+- Team: agents sharing `workspace: "<name>"` share the same dev-home, git, and browser, differentiate by `role` (own system prompt) and coordinate via their personal inboxes.
+- Supervisor runs as the human user, keeps only metadata in `~/.agent-os/`. Agent-private files stay in the dev-home.
 
-- AgentConfig.git credentials land in the agent user's own .gitconfig/.git-credentials, not shared.
-- sandbox-exec profile applied per task execution as defense-in-depth on top of OS-user isolation (optional, per-agent flag `sandboxed?: boolean`, default false in MVP).
-- packages/sandbox is now FUNCTIONAL for user management (requires sudo; commands surfaced to the human for confirmation before running) and provides sandbox-exec wrappers.
+- AgentConfig.git credentials land in the agent's own .gitconfig/.git-credentials in its dev-home, not shared.
+- sandbox-exec profile applied per task execution as defense-in-depth on top of dev-home isolation (optional, per-agent flag `sandboxed?: boolean`, default false in MVP).
+- packages/sandbox provides sandbox-exec wrappers.
 
 ## Automations
 

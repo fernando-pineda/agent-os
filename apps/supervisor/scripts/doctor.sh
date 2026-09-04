@@ -28,19 +28,6 @@ else
   fail=1
 fi
 
-if command -v sysadminctl >/dev/null 2>&1; then
-  echo "PASS: sysadminctl found"
-else
-  echo "FAIL: sysadminctl not found (required for workspace user creation)"
-  fail=1
-fi
-
-if sudo -n true 2>/dev/null; then
-  echo "PASS: sudo available without password"
-else
-  echo "WARN: sudo -n true failed; workspace user creation may require manual password entry"
-fi
-
 registry_path="$HOME/.agent-os/registry.json"
 if [[ -f "$registry_path" ]]; then
   echo "PASS: $registry_path readable"

@@ -49,7 +49,9 @@ export async function loadAgentConfig(
   }
 
   const workspace = agent.workspace ?? agent.id;
-  const homeDir = process.env.AGENT_OS_HOME ?? `/Users/agentos-${workspace}`;
+  const homeDir =
+    process.env.AGENT_OS_HOME ??
+    join(homedir(), '.agent-os', 'dev-homes', workspace);
   const model = agent.model ?? config.defaultModel;
   return { config, agent, model, workspace, homeDir };
 }

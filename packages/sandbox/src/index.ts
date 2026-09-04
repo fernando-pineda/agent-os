@@ -4,11 +4,3 @@ export {
   isSandboxExecAvailable,
   wrapWithSandbox,
 } from './sandboxExec.js';
-export {
-  buildDsclCommands,
-  type DsclUserSpec,
-  ensureWorkspaceUser,
-  homeDirForWorkspace,
-  userExists,
-  usernameForWorkspace,
-} from './users.js';

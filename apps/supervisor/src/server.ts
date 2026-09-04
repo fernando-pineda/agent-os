@@ -381,8 +381,7 @@ async function handle(
       config?.defaultModel ?? 'unknown-model',
     );
     if (result.error) {
-      const status = result.needsSudo ? 422 : 500;
-      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
       return;
     }

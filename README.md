@@ -19,13 +19,12 @@ Everything is direct HTTP on localhost. The supervisor owns the registry and pro
 
 ## Isolation model
 
-The workspace is the unit of isolation. Each workspace is backed by a real macOS user `agentos-<workspace>` with home directory `/Users/agentos-<workspace>`.
+The workspace is the unit of isolation. Each workspace gets its own dev-home at `~/.agent-os/dev-homes/<workspace>` (thread, memory, outbox, git config, usage log).
 
 - Default: an agent without an explicit `workspace` gets its own workspace equal to its id.
-- Team: agents sharing the same `workspace` run as the same macOS user, share home/git/browser, and differentiate by `role`.
+- Team: agents sharing the same `workspace` share the same dev-home, git, and browser profile, and differentiate by `role`.
 - Agents coordinate over HTTP (`/inbox`), never shared memory or a queue.
-- Agents cannot read other workspaces or the human home beyond macOS defaults.
-- The supervisor runs as the human user and keeps only metadata in `~/.agent-os/`.
+- The supervisor runs as the human user and keeps metadata in `~/.agent-os/`.
 
 ## How it works
 
@@ -59,7 +58,6 @@ Cron-triggered wake-ups, in-process via croner (no OS crontab). An automation de
 - Node.js >=22 (see `.nvmrc`)
 - pnpm 9.15.0
 - tmux
-- sudo access (for provisioning workspace macOS users)
 
 ```bash
 brew install tmux

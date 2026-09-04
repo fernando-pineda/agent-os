@@ -18,12 +18,6 @@ import type {
   AgentInfo,
   AgentStatus,
 } from '@agent-os/core';
-import {
-  ensureWorkspaceUser,
-  homeDirForWorkspace,
-  userExists,
-  usernameForWorkspace,
-} from '@agent-os/sandbox';
 import { uninstallLaunchdAgent } from './launchd.js';
 import { listMcpServers } from './mcps.js';
 import { listModels } from './onboarding.js';
@@ -158,8 +152,6 @@ export interface CreateAgentInput {
 export interface CreateAgentResult {
   agent?: AgentInfo | undefined;
   error?: string | undefined;
-  needsSudo?: boolean | undefined;
-  command?: string | undefined;
 }
 
 export async function writeAgentConfig(config: AgentConfig): Promise<void> {
@@ -243,9 +235,8 @@ export async function deleteAgent(
   await saveRegistry(registry);
 
   await rm(join(AGENTS_ROOT, id), { recursive: true, force: true });
-  // Also drop the supervisor-owned dev-home (thread, memory, outbox, usage)
-  // so a recreated agent with the same id starts clean. Only dev-homes under
-  // .agent-os are touched; real workspace user homes are never removed.
+  // Also drop the dev-home (thread, memory, outbox, usage) so a recreated
+  // agent with the same id starts clean.
   await rm(join(homedir(), '.agent-os', 'dev-homes', id), {
     recursive: true,
     force: true,
@@ -302,15 +293,6 @@ export async function createAgent(
   }
 
   await writeAgentConfig(config);
-
-  try {
-    await ensureWorkspaceUser(workspace);
-  } catch (err) {
-    const message = (err as Error).message ?? String(err);
-    console.warn(
-      `Workspace user for ${workspace} not created (${message}); using degraded dev home`,
-    );
-  }
 
   // Use getOrCreateEntry so the port is assigned atomically and reused by
   // spawnAgentProcess below, guaranteeing the spawned process binds the exact
@@ -755,77 +737,31 @@ async function spawnAgentProcess(
   }
 
   const entry = await getOrCreateEntry(registry, id);
-  const workspaceHome = homeDirForWorkspace(workspace);
-  const username = usernameForWorkspace(workspace);
-  const exists = await userExists(workspace);
-  const canSudo = await sudoAvailable();
-  const runningAsRoot = process.getuid?.() === 0;
-  const useWorkspaceUser = exists && (runningAsRoot || canSudo);
+  const devHome = join(homedir(), '.agent-os', 'dev-homes', workspace);
+  await mkdir(devHome, { recursive: true });
 
-  let effectiveHome: string;
-  let spawnOptions: {
+  const spawnOptions: {
     env: NodeJS.ProcessEnv;
     detached: boolean;
     stdio: ['ignore', number, number];
-    cwd?: string;
-    uid?: number;
+    cwd: string;
+  } = {
+    env: {
+      ...process.env,
+      AGENT_ID: id,
+      AGENT_PORT: String(entry.port),
+      AGENT_OS_HOME: devHome,
+    },
+    detached: true,
+    stdio: ['ignore', 0, 0],
+    cwd: devHome,
   };
-
-  if (useWorkspaceUser) {
-    effectiveHome = workspaceHome;
-    spawnOptions = {
-      env: {
-        ...process.env,
-        AGENT_ID: id,
-        AGENT_PORT: String(entry.port),
-        HOME: workspaceHome,
-        AGENT_OS_HOME: workspaceHome,
-      },
-      detached: true,
-      stdio: ['ignore', 0, 0],
-      cwd: workspaceHome,
-    };
-  } else {
-    const devHome = join(homedir(), '.agent-os', 'dev-homes', workspace);
-    try {
-      await access(devHome);
-      effectiveHome = devHome;
-    } catch {
-      await mkdir(devHome, { recursive: true });
-      effectiveHome = devHome;
-    }
-    if (runningAsRoot || canSudo) {
-      console.warn(
-        `Workspace user ${username} missing; using degraded dev home ${effectiveHome}`,
-      );
-    }
-    spawnOptions = {
-      env: {
-        ...process.env,
-        AGENT_ID: id,
-        AGENT_PORT: String(entry.port),
-        AGENT_OS_HOME: effectiveHome,
-      },
-      detached: true,
-      stdio: ['ignore', 0, 0],
-      cwd: effectiveHome,
-    };
-  }
 
   const outFd = await open(logPath, 'a');
   const errFd = await open(logPath, 'a');
   spawnOptions.stdio = ['ignore', outFd.fd, errFd.fd];
 
-  let child: ReturnType<typeof spawn>;
-  if (useWorkspaceUser && (runningAsRoot || canSudo)) {
-    child = spawn(
-      'sudo',
-      ['-u', username, process.execPath, agentDistPath],
-      spawnOptions,
-    );
-  } else {
-    child = spawn(process.execPath, [agentDistPath], spawnOptions);
-  }
+  const child = spawn(process.execPath, [agentDistPath], spawnOptions);
 
   child.unref();
   if (child.pid) {
@@ -870,18 +806,4 @@ export function toAgentInfo(
     info.reminders = config.reminders;
   }
   return info;
-}
-
-export function buildSysadminctlCommand(workspace: string): string {
-  const username = usernameForWorkspace(workspace);
-  const homeDir = homeDirForWorkspace(workspace);
-  return `sudo sysadminctl -addUser ${username} -fullName "agent-os workspace ${workspace}" -password "<generate>" -home ${homeDir} -adminUser false`;
-}
-
-function sudoAvailable(): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile('sudo', ['-n', 'true'], (error) => {
-      resolve(error === null);
-    });
-  });
 }
