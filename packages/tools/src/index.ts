@@ -34,6 +34,23 @@ import { shell } from './shell.js';
 import { simctl } from './simctl.js';
 import { taskCreate, taskGet, taskList, taskUpdate } from './tasks.js';
 
+/** Tools that have Pi built-in equivalents and should not be registered as custom. */
+const PI_BUILTIN_REPLACED = new Set([
+  'shell',
+  'file_read',
+  'file_write',
+  'file_list',
+]);
+
+/**
+ * Custom tools that Pi does not have built-in.
+ * Pi provides bash, read, edit, write, ls, grep, find natively.
+ * We only register tools that are agent-os specific.
+ */
+export function customTools(): Tool[] {
+  return defaultTools().filter((t) => !PI_BUILTIN_REPLACED.has(t.spec.name));
+}
+
 export function defaultTools(): Tool[] {
   return [
     shell,

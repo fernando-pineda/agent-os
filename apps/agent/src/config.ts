@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AgentConfig, GlobalConfig } from '@agent-os/core';
 
 export interface LoadedAgentConfig {
@@ -26,10 +26,16 @@ export async function loadAgentConfig(
   let globalRaw: string;
   try {
     globalRaw = await readFile(globalPath, 'utf-8');
-  } catch (err) {
-    throw new Error(
-      `Missing global config at ${globalPath}. Onboard first: ${(err as Error).message}`,
-    );
+  } catch {
+    // Pi owns provider credentials. Create a minimal config so the agent
+    // can boot without the old onboarding flow.
+    const minimal: GlobalConfig = { createdAt: new Date().toISOString() };
+    await mkdir(dirname(globalPath), { recursive: true, mode: 0o700 });
+    await writeFile(globalPath, JSON.stringify(minimal, null, 2), {
+      mode: 0o600,
+      encoding: 'utf-8',
+    });
+    globalRaw = JSON.stringify(minimal);
   }
 
   let agentRaw: string;

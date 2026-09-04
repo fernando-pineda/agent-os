@@ -305,10 +305,7 @@ export async function createPiSession(
     toolToPiDefinition(tool, config.contextFactory),
   );
   const settingsManager = SettingsManager.inMemory();
-  const allExtensions = [
-    createSystemPromptExtension(config),
-    ...(config.extensionFactories ?? []),
-  ];
+  const allExtensions = [...(config.extensionFactories ?? [])];
   const resourceLoader = new DefaultResourceLoader({
     cwd: config.cwd,
     agentDir: join(config.homeDir, '.pi', 'agent'),
@@ -324,7 +321,6 @@ export async function createPiSession(
     model,
     modelRuntime,
     customTools,
-    noTools: 'builtin',
     resourceLoader,
     sessionManager,
     settingsManager,

@@ -25,7 +25,16 @@ export function toolToPiDefinition(
         );
       }
       const args = Object.fromEntries(Object.entries(params));
-      const result = await tool.execute(args, contextFactory(signal));
+      let result;
+      try {
+        result = await tool.execute(args, contextFactory(signal));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text' as const, text: `Tool error: ${msg}` }],
+          details: { ok: false, isError: true },
+        };
+      }
       const content: (TextContent | ImageContent)[] = [
         { type: 'text', text: result.output },
         ...(result.images ?? []).map(

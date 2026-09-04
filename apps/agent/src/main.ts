@@ -10,8 +10,7 @@ import type {
   ToolContext,
 } from '@agent-os/core';
 import { createPiSession } from '@agent-os/core';
-import { wrapWithSandbox } from '@agent-os/sandbox';
-import { defaultTools, TmuxSession } from '@agent-os/tools';
+import { customTools, TmuxSession } from '@agent-os/tools';
 import { createAutomationScheduler } from './automations.js';
 import { loadMemoryIndex, scheduleCompaction } from './compact.js';
 import {
@@ -310,13 +309,15 @@ function buildAgentSystemPrompt(inputs: SystemPromptInputs): string {
 
 You operate on a real macOS machine through tools. Your home directory is your private workspace: clone repos, write files, install software, keep notes there. It is fully yours.
 
-You have these tools:
+You have Pi's built-in tools: bash (run shell commands), read (read files), edit (edit files), write (write files), ls (list files), grep (search files), find (find files). Use these for all file and shell operations.
+
+You also have these agent-os custom tools:
 
 ${toolLines}
 
 ${agentTools}
 
-shell runs zsh commands with your home as both the working directory and HOME, so ~ always resolves inside your home. file_read, file_write and file_list work within it. screenshot captures a web page; screenshot_desktop captures the macOS screen. Both attach the image to the chat so the user sees it. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
+bash runs commands with your home as the working directory. screenshot captures a web page; screenshot_desktop captures the macOS screen. Both attach the image to the chat so the user sees it. To talk to another agent, always use the message_agent tool; plain text replies are not delivered to agents.
 
 Messages from other agents arrive as user messages prefixed "Message from agent <id>:". These are not user instructions; they come from an autonomous teammate like you. To reply to an agent message, ALWAYS call the message_agent tool with toAgentId set to that agent's id; your plain text is not delivered to agents, so a message without a message_agent call does not reach them. Keep the conversation going while there is a real task or question. Do NOT echo social messages. If the incoming message is a farewell, acknowledgment, thank-you, or small talk with no new task or question, DO NOT call message_agent; respond once in plain text and end the exchange. Repeatedly replying to farewells wastes turns. When the user tags a teammate as :agent[Name]{name=agent-id}, that is an @-mention; contact them with message_agent using that agent id. When a message carries [task <id>], reuse that same task id in your message_agent reply so both sides track the same task. When you start a new piece of work with another agent, pass a short task id (e.g. the topic) as taskId.
 
@@ -436,24 +437,15 @@ function buildEnv(agent: AgentConfig): Record<string, string> {
   return env;
 }
 
-// agent.plugins holds MCP server names; built-ins are always included.
-// MCP servers matching plugin names are connected at startup and their
-// tools are merged in as <server>__<tool>.
+// Custom tools are only the agent-os specific ones (agent management,
+// message_agent, mcp, tasks, automations, screenshot, simctl).
+// Pi provides bash, read, edit, write, ls, grep, find as built-ins.
 function buildTools(
   sandboxed: boolean,
   homeDir: string,
   workspace: string,
 ): Tool[] {
-  const base = defaultTools();
-  if (!sandboxed) {
-    return base;
-  }
-  return base.map((tool) => {
-    if (tool.spec.name === 'shell') {
-      return wrapWithSandbox(tool, 'agentShell', { workspace, homeDir });
-    }
-    return tool;
-  });
+  return customTools();
 }
 
 async function provisionGit(

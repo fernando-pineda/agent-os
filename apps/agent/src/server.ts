@@ -562,20 +562,21 @@ export function createAgentServer(deps: ServerDeps): AgentServer {
           } as never);
         };
         const unsubscribe = serverDeps.sessionHandle.subscribe((event) => {
-          handleSessionEvent(
-            event,
-            streamController,
-            toolContexts,
-            segments,
-            (usage) => {
-              lastUsage = usage;
-            },
-            sendFinish,
-          );
-          if (
-            event.type === 'tool_execution_end' ||
-            event.type === 'agent_end'
-          ) {
+          try {
+            handleSessionEvent(
+              event,
+              streamController,
+              toolContexts,
+              segments,
+              (usage) => {
+                lastUsage = usage;
+              },
+              undefined,
+            );
+          } catch (err) {
+            console.error('handleSessionEvent error:', err);
+          }
+          if (event.type === 'tool_execution_end') {
             void persistPartial().catch((err) => {
               console.error('Failed to persist partial turn', err);
             });
@@ -769,6 +770,7 @@ function handleSessionEvent(
   const last = segments[segments.length - 1];
   if (event.type === 'message_update') {
     const assistantEvent = event.assistantMessageEvent;
+    if (!assistantEvent) return;
     if (assistantEvent.type === 'text_delta') {
       controller?.appendText(assistantEvent.delta);
       if (last?.kind === 'text') {
@@ -781,8 +783,9 @@ function handleSessionEvent(
       return;
     }
     if (assistantEvent.type === 'toolcall_start') {
-      const block = assistantEvent.partial.content[assistantEvent.contentIndex];
-      if (block?.type !== 'toolCall') return;
+      const block =
+        assistantEvent.partial?.content?.[assistantEvent.contentIndex];
+      if (!block || block.type !== 'toolCall') return;
       const toolController = controller?.addToolCallPart({
         toolCallId: block.id,
         toolName: block.name,
@@ -801,13 +804,15 @@ function handleSessionEvent(
       return;
     }
     if (assistantEvent.type === 'toolcall_delta') {
-      const block = assistantEvent.partial.content[assistantEvent.contentIndex];
-      if (block?.type !== 'toolCall') return;
+      const block =
+        assistantEvent.partial?.content?.[assistantEvent.contentIndex];
+      if (!block || block.type !== 'toolCall') return;
       toolContexts.get(block.id)?.argsText?.append(assistantEvent.delta);
       return;
     }
     if (assistantEvent.type === 'toolcall_end') {
       const call = assistantEvent.toolCall;
+      if (!call) return;
       toolContexts.get(call.id)?.argsText?.close();
       const segment = segments.find(
         (item) => item.kind === 'tool' && item.toolCallId === call.id,
@@ -826,10 +831,12 @@ function handleSessionEvent(
       return;
     }
     if (assistantEvent.type === 'done') {
-      onUsage?.({
-        inputTokens: assistantEvent.message.usage.input,
-        outputTokens: assistantEvent.message.usage.output,
-      });
+      if (assistantEvent.message?.usage) {
+        onUsage?.({
+          inputTokens: assistantEvent.message.usage.input,
+          outputTokens: assistantEvent.message.usage.output,
+        });
+      }
     }
     return;
   }
@@ -897,9 +904,9 @@ function handleSessionEvent(
     return;
   }
   if (event.type === 'agent_end') {
-    if (!event.willRetry) {
-      onAgentEnd?.();
-    }
+    // sendFinish is called after prompt() resolves, not per agent_end,
+    // because Pi emits agent_end after each turn and the full response
+    // (including follow-up text after tool execution) must stream first.
   }
 }
 
@@ -921,11 +928,15 @@ async function persistTurn(
 ): Promise<void> {
   // Persist the full thread as sent by the client (it already includes the
   // new user message) merged with anything stored that the client missed.
+  // Assistant messages from the client are discarded: we always rebuild
+  // assistant messages from segments to avoid ID mismatches that cause
+  // duplication (the client generates its own IDs during streaming).
   const stored = await loadThread(deps.homeDir);
   const storedIds = new Set(
     stored.map((m) => m.id).filter((id): id is string => Boolean(id)),
   );
   const incoming = existingMessages
+    .filter((m) => m.role !== 'assistant') // only persist user messages from client
     .filter((m) => !m.id || !storedIds.has(m.id))
     .map((m) => (m.id ? m : { ...m, id: crypto.randomUUID() }));
 
@@ -956,10 +967,7 @@ async function persistTurn(
   // Drop stored assistant messages from a prior partial persist of this
   // same turn before appending the freshly rebuilt ones.
   const messages = turnId
-    ? [
-        ...stored.filter((m) => m.metadata?.turnId !== turnId),
-        ...incoming.filter((m) => m.metadata?.turnId !== turnId),
-      ]
+    ? [...stored.filter((m) => m.metadata?.turnId !== turnId), ...incoming]
     : [...stored, ...incoming];
 
   // Group segments into messages: a tool call starts a new message;
