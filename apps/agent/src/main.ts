@@ -102,7 +102,6 @@ async function main(): Promise<void> {
     homeDir,
     agent,
     model,
-    provider: config.provider,
     supportsVision: agent.supportsVision === true,
     sessionHandle: initialSessionHandle,
     tools,
@@ -214,8 +213,6 @@ async function createSession(
     agent.plugins ?? [],
   );
   const sessionConfig: PiSessionConfig = {
-    provider: config.config.provider,
-    apiKey: process.env.FIREWORKS_API_KEY ?? config.config.apiKey,
     model: config.model,
     homeDir,
     cwd: homeDir,
@@ -230,7 +227,6 @@ async function createSession(
       buildAgentSystemPrompt({
         tools,
         model: config.model,
-        provider: config.config.provider,
         agentId: config.agent.id,
         agentName: agent.name,
         ...(agent.role ? { role: agent.role } : {}),
@@ -256,7 +252,6 @@ async function createSession(
 interface SystemPromptInputs {
   tools: Tool[];
   model: string;
-  provider: 'fireworks' | 'zai';
   agentId: string;
   agentName?: string;
   role?: string;
@@ -294,12 +289,11 @@ function buildAgentSystemPrompt(inputs: SystemPromptInputs): string {
     'Manage MCP plugin servers with mcp_list, mcp_create, mcp_update, mcp_delete and mcp_status. Activate plugins per agent via the plugins field of agent_create / agent_update (names from mcp_list).',
     'Track your work with task_create, task_update, task_list and task_get so you remember ongoing tasks across messages.',
   ].join('\n');
-  const providerLabel = inputs.provider === 'zai' ? 'z.ai' : 'Fireworks';
   const identity = [
     'You are an autonomous agent in agent-os, a system of long-running macOS agents supervised by a human through a web UI.',
     inputs.agentName ? `Your name is "${inputs.agentName}".` : '',
     inputs.agentId ? `Your agent id is "${inputs.agentId}".` : '',
-    `You run on the model ${inputs.model} served through ${providerLabel}. When the user asks about your capabilities, knowledge cutoff, or behavior, answer as this model. Never claim to be a different model or a product of another vendor.`,
+    `You run on the model ${inputs.model}. When the user asks about your capabilities, knowledge cutoff, or behavior, answer as this model. Never claim to be a different model or a product of another vendor.`,
     `Current date and time: ${now.toISOString()} (${now.toString()}). Use this for anything date-sensitive instead of your training cutoff.`,
     `Today is ${local} (${timeZone}, ${offset}). Whenever the user says "hoy", "today", "ayer", "yesterday", "ahora", "now", "reciente", "recent", "esta semana", "this week", or any relative date or time, resolve it against this date, time and timezone, never against your training data.`,
     inputs.role

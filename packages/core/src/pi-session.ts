@@ -23,8 +23,6 @@ import { toolToPiDefinition } from './tool-adapter.js';
 import type { ChatMessage, Tool, ToolContext } from './types.js';
 
 export interface PiSessionConfig {
-  provider: 'fireworks' | 'zai';
-  apiKey: string;
   model: string;
   homeDir: string;
   cwd: string;
@@ -255,35 +253,54 @@ function createSystemPromptExtension(
 
 async function resolveModel(
   modelRuntime: ModelRuntime,
-  provider: PiSessionConfig['provider'],
   modelId: string,
 ): Promise<Model<Api>> {
-  const normalizedModelId = modelId.toLowerCase();
-  const normalizedModel = modelRuntime.getModel(provider, normalizedModelId);
-  const model =
-    normalizedModel ?? modelRuntime.getModel(provider, modelId.toUpperCase());
-  if (model) {
-    return model;
+  // Try to find the model across all configured providers.
+  // modelId may be "provider/model" or just "model-id".
+  const slashIdx = modelId.indexOf('/');
+  if (slashIdx > 0) {
+    const providerId = modelId.slice(0, slashIdx);
+    const rawModelId = modelId.slice(slashIdx + 1);
+    const model = modelRuntime.getModel(providerId, rawModelId);
+    if (model) return model;
+    const modelLower = modelRuntime.getModel(
+      providerId,
+      rawModelId.toLowerCase(),
+    );
+    if (modelLower) return modelLower;
   }
 
-  const availableModels = await modelRuntime.getAvailable(provider);
-  const fallbackModel = availableModels[0];
-  if (!fallbackModel) {
-    throw new Error(`No models available for provider ${provider}`);
+  // Search all providers for a matching model id.
+  for (const provider of modelRuntime.getProviders()) {
+    const model = modelRuntime.getModel(provider.id, modelId);
+    if (model) return model;
+    const modelLower = modelRuntime.getModel(
+      provider.id,
+      modelId.toLowerCase(),
+    );
+    if (modelLower) return modelLower;
   }
 
-  console.warn(
-    `Model ${modelId} was not found for provider ${provider}; using ${fallbackModel.id}`,
+  // Fallback: first available model from any provider.
+  const available = await modelRuntime.getAvailable();
+  if (available.length > 0) {
+    const fallback = available[0]!;
+    console.warn(
+      `Model ${modelId} not found in any provider; using ${fallback.provider}/${fallback.id}`,
+    );
+    return fallback;
+  }
+
+  throw new Error(
+    `No models available. Configure a provider in Pi (env vars, ~/.pi/agent/auth.json, or /login).`,
   );
-  return fallbackModel;
 }
 
 export async function createPiSession(
   config: PiSessionConfig,
 ): Promise<PiSessionHandle> {
   const modelRuntime = await ModelRuntime.create();
-  await modelRuntime.setRuntimeApiKey(config.provider, config.apiKey);
-  const model = await resolveModel(modelRuntime, config.provider, config.model);
+  const model = await resolveModel(modelRuntime, config.model);
   const customTools = config.tools.map((tool) =>
     toolToPiDefinition(tool, config.contextFactory),
   );

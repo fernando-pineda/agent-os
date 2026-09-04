@@ -27,15 +27,10 @@ import {
   getConfig,
   getMcpServers,
   getMcpStatuses,
-  getModels,
   updateConfig,
   updateMcpServer,
 } from '@/lib/api';
-import type {
-  GlobalConfigStatus,
-  McpServerConfig,
-  McpStatus,
-} from '@/lib/types';
+import type { McpServerConfig, McpStatus } from '@/lib/types';
 
 interface SettingsDialogProps {
   open: boolean;
@@ -43,19 +38,14 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
-  const { models, refreshModels } = useModelsFeed();
+  const { models } = useModelsFeed();
 
-  const [config, setConfig] = useState<GlobalConfigStatus | null>(null);
-  const [provider, setProvider] = useState<'fireworks' | 'zai'>('fireworks');
-  const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [reminders, setReminders] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [providerSaving, setProviderSaving] = useState(false);
-  const [providerError, setProviderError] = useState('');
+  const [configError, setConfigError] = useState('');
   const [saved, setSaved] = useState(false);
 
-  // MCP state
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});
   const [statusesLoading, setStatusesLoading] = useState(false);
@@ -86,8 +76,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     try {
       const res = await getMcpStatuses();
       setStatuses(res.statuses);
-    } catch {
-      // status probe is best-effort; leave dots as unknown on failure
+    } catch (err) {
+      setMcpError(
+        err instanceof Error ? err.message : 'Failed to load server statuses',
+      );
     } finally {
       setStatusesLoading(false);
     }
@@ -95,18 +87,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   useEffect(() => {
     if (!open) return;
-    setProviderError('');
+    setConfigError('');
     setSaved(false);
     setMcpError('');
     getConfig()
       .then((cfg) => {
-        setConfig(cfg);
-        setProvider(cfg.provider);
-        setDefaultModel(cfg.defaultModel);
+        setDefaultModel(cfg.defaultModel ?? '');
         setReminders(cfg.reminders ?? []);
       })
       .catch((err) => {
-        setProviderError(
+        setConfigError(
           err instanceof Error ? err.message : 'Failed to load config',
         );
       });
@@ -116,58 +106,26 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const onSaveConfig = useCallback(async () => {
     setSaving(true);
-    setProviderError('');
+    setConfigError('');
     setSaved(false);
     try {
       const payload: {
-        apiKey?: string;
         defaultModel?: string;
         reminders?: string[];
       } = {};
-      if (apiKey.trim()) payload.apiKey = apiKey.trim();
       if (defaultModel.trim()) payload.defaultModel = defaultModel.trim();
       payload.reminders = reminders;
       const updated = await updateConfig(payload);
-      setConfig(updated);
       setReminders(updated.reminders ?? []);
-      setApiKey('');
       setSaved(true);
     } catch (err) {
-      setProviderError(
+      setConfigError(
         err instanceof Error ? err.message : 'Failed to save config',
       );
     } finally {
       setSaving(false);
     }
-  }, [apiKey, defaultModel, reminders]);
-
-  const onProviderChange = useCallback(
-    async (next: 'fireworks' | 'zai') => {
-      if (next === provider) return;
-      setProviderSaving(true);
-      setProviderError('');
-      try {
-        const updated = await updateConfig({ provider: next });
-        setConfig(updated);
-        setProvider(updated.provider);
-        setDefaultModel(updated.defaultModel);
-        // Models feed is cached server-side; refetch to get the new provider's list.
-        const list = await getModels();
-        refreshModels();
-        if (list.length > 0) {
-          setDefaultModel(list[0]?.id ?? updated.defaultModel);
-        }
-      } catch (err) {
-        setProviderError(
-          err instanceof Error ? err.message : 'Failed to switch provider',
-        );
-        setProvider(config?.provider ?? 'fireworks');
-      } finally {
-        setProviderSaving(false);
-      }
-    },
-    [provider, config, refreshModels],
-  );
+  }, [defaultModel, reminders]);
 
   const openNewForm = useCallback(() => {
     setEditingServer(null);
@@ -224,62 +182,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="text-zinc-400">
-            Configure the provider and plugins.
+            Configure defaults and plugins.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="provider">
+        <Tabs defaultValue="general">
           <TabsList>
-            <TabsTab value="provider">Provider</TabsTab>
+            <TabsTab value="general">General</TabsTab>
             <TabsTab value="plugins">Plugins</TabsTab>
             <TabsTab value="reminders">Reminders</TabsTab>
             <TabsIndicator />
           </TabsList>
 
-          <TabsPanel value="provider">
+          <TabsPanel value="general">
             <div className="space-y-3 overflow-y-auto py-2 pr-1">
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">
-                  Provider
-                </label>
-                <div className="flex gap-2">
-                  {(['fireworks', 'zai'] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => onProviderChange(p)}
-                      disabled={providerSaving}
-                      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                        provider === p
-                          ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                          : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {p === 'zai' ? 'z.ai' : 'Fireworks'}
-                    </button>
-                  ))}
-                </div>
-                {providerSaving && (
-                  <p className="mt-1 text-xs text-zinc-500">Switching...</p>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs text-zinc-400">
-                  API key
-                </label>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={config ? config.apiKey : 'fw-...'}
-                  className="border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600"
-                />
-                <p className="mt-1 text-xs text-zinc-500">
-                  Leave empty to keep the current key.
-                </p>
-              </div>
-
               <div>
                 <ModelPickerModal
                   models={models}
@@ -296,9 +212,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               </div>
             </div>
 
-            {providerError && (
+            {configError && (
               <div className="px-1 pb-2 text-xs text-destructive">
-                {providerError}
+                {configError}
               </div>
             )}
             {saved && (

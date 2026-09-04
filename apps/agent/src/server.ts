@@ -38,7 +38,6 @@ export interface ServerDeps {
   homeDir: string;
   agent: AgentConfig;
   model: string;
-  provider?: 'fireworks' | 'zai';
   supportsVision?: boolean;
   sessionHandle: PiSessionHandle;
   tools: Tool[];

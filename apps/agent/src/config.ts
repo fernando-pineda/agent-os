@@ -52,7 +52,7 @@ export async function loadAgentConfig(
   const homeDir =
     process.env.AGENT_OS_HOME ??
     join(homedir(), '.agent-os', 'dev-homes', workspace);
-  const model = agent.model ?? config.defaultModel;
+  const model = agent.model ?? config.defaultModel ?? '';
   return { config, agent, model, workspace, homeDir };
 }
 

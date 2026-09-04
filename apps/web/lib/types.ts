@@ -34,17 +34,16 @@ export interface OnboardingStatus {
 }
 
 export interface OnboardingPayload {
-  provider: 'fireworks' | 'zai';
-  apiKey: string;
-  defaultModel: string;
+  defaultModel?: string;
 }
 
 export interface ModelItem {
   id: string;
   supportsTools: boolean;
-  serverless: boolean;
-  contextLength?: number;
   supportsVision?: boolean;
+  provider?: string;
+  name?: string;
+  contextWindow?: number;
 }
 
 export interface ModelsResponse {
@@ -80,15 +79,11 @@ export interface UpdateAgentPayload {
 }
 
 export interface GlobalConfigStatus {
-  provider: 'fireworks' | 'zai';
-  apiKey: string;
-  defaultModel: string;
+  defaultModel?: string;
   reminders?: string[];
 }
 
 export interface UpdateConfigPayload {
-  provider?: 'fireworks' | 'zai';
-  apiKey?: string;
   defaultModel?: string;
   reminders?: string[];
 }

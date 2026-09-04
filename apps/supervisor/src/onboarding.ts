@@ -9,20 +9,13 @@ export function resetModelCache(): void {
   modelCache = undefined;
 }
 
-type Provider = 'fireworks' | 'zai';
-
-interface OnboardingInput {
-  provider: Provider;
-  apiKey: string;
-  defaultModel: string;
-}
-
 interface ModelEntry {
   id: string;
   supportsTools: boolean;
-  serverless: boolean;
-  contextLength?: number;
   supportsVision?: boolean;
+  provider: string;
+  name?: string;
+  contextWindow?: number;
 }
 
 interface ModelCache {
@@ -34,12 +27,9 @@ let modelCache: ModelCache | undefined;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export async function isConfigured(): Promise<boolean> {
-  try {
-    await access(configPath);
-    return true;
-  } catch {
-    return false;
-  }
+  // Pi owns provider credentials. agent-os is always "configured" as long
+  // as Pi can resolve a model (env vars, ~/.pi/agent/auth.json, or OAuth).
+  return true;
 }
 
 export async function readGlobalConfig(): Promise<GlobalConfig | null> {
@@ -51,11 +41,11 @@ export async function readGlobalConfig(): Promise<GlobalConfig | null> {
   }
 }
 
-export async function onboard(input: OnboardingInput): Promise<void> {
+export async function ensureConfig(): Promise<GlobalConfig> {
+  const existing = await readGlobalConfig();
+  if (existing) return existing;
+  // Create a minimal config so the supervisor does not 404 on /api/config.
   const config: GlobalConfig = {
-    provider: input.provider,
-    apiKey: input.apiKey,
-    defaultModel: input.defaultModel,
     createdAt: new Date().toISOString(),
   };
   await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
@@ -63,24 +53,14 @@ export async function onboard(input: OnboardingInput): Promise<void> {
     mode: 0o600,
     encoding: 'utf-8',
   });
+  return config;
 }
 
 export async function updateGlobalConfig(patch: {
-  provider?: Provider;
-  apiKey?: string;
   defaultModel?: string;
   reminders?: string[];
 }): Promise<GlobalConfig> {
-  const current = await readGlobalConfig();
-  if (!current) {
-    throw new Error('Not configured');
-  }
-  if (patch.provider !== undefined) {
-    current.provider = patch.provider;
-  }
-  if (patch.apiKey !== undefined && patch.apiKey !== '') {
-    current.apiKey = patch.apiKey;
-  }
+  const current = (await readGlobalConfig()) ?? (await ensureConfig());
   if (patch.defaultModel !== undefined) {
     current.defaultModel = patch.defaultModel;
   }
@@ -105,93 +85,35 @@ export async function listModels(): Promise<{
     return { models: modelCache.models };
   }
 
-  const config = await readGlobalConfig();
-  if (!config) {
-    return { models: [], warning: 'Not configured' };
-  }
-
-  if (config.provider === 'zai') {
-    // z.ai has no list-models endpoint; keep in sync with the coding plan's
-    // current GLM lineup.
-    const entries: ModelEntry[] = [
-      {
-        id: 'GLM-5.3',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 1000000,
-      },
-      {
-        id: 'GLM-5.3-Flash',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 1000000,
-        supportsVision: true,
-      },
-      {
-        id: 'GLM-5.2',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 1000000,
-      },
-      {
-        id: 'GLM-4.7',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 200000,
-      },
-      {
-        id: 'GLM-4.6',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 200000,
-      },
-      {
-        id: 'GLM-4.6V',
-        supportsTools: true,
-        serverless: true,
-        contextLength: 200000,
-        supportsVision: true,
-      },
-    ];
-    modelCache = { fetchedAt: now, models: entries };
-    return { models: entries };
-  }
-
   try {
-    const res = await fetch(
-      'https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=200',
-      {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          Accept: 'application/json',
-        },
-      },
-    );
-    if (!res.ok) {
-      throw new Error(`Fireworks API returned ${res.status}`);
+    const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
+    const modelRuntime = await ModelRuntime.create();
+    const providers = modelRuntime.getProviders();
+    const entries: ModelEntry[] = [];
+
+    for (const provider of providers) {
+      const models = modelRuntime.getModels(provider.id);
+      for (const model of models) {
+        entries.push({
+          id: `${provider.id}/${model.id}`,
+          supportsTools: true,
+          ...(model.input?.includes('image') ? { supportsVision: true } : {}),
+          provider: provider.id,
+          name: model.name,
+          ...(model.contextWindow
+            ? { contextWindow: model.contextWindow }
+            : {}),
+        });
+      }
     }
-    const data = (await res.json()) as unknown;
-    const models =
-      (data as { models?: Array<Record<string, unknown>> }).models ?? [];
-    const entries: ModelEntry[] = models
-      .map((m) => ({
-        id: String(m.id ?? m.name ?? ''),
-        supportsTools: Boolean(
-          m.supportsTools ?? m.supports_tool_calls ?? false,
-        ),
-        serverless: Boolean(m.supportsServerless ?? false),
-        ...(typeof m.contextLength === 'number' && {
-          contextLength: m.contextLength,
-        }),
-        ...(typeof m.supportsImageInput === 'boolean' && {
-          supportsVision: m.supportsImageInput,
-        }),
-      }))
-      .filter((m) => m.supportsTools && m.serverless);
+
     modelCache = { fetchedAt: now, models: entries };
     return { models: entries };
   } catch (err) {
     const warning = (err as Error).message ?? String(err);
-    return { models: [], warning };
+    return {
+      models: [],
+      warning: `Could not load models from Pi: ${warning}`,
+    };
   }
 }

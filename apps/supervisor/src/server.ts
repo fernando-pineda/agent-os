@@ -21,9 +21,8 @@ import {
   updateMcpServer,
 } from './mcps.js';
 import {
-  isConfigured,
+  ensureConfig,
   listModels,
-  onboard,
   readGlobalConfig,
   updateGlobalConfig,
 } from './onboarding.js';
@@ -103,46 +102,26 @@ async function handle(
   }
 
   if (pathname === '/api/onboarding/status' && req.method === 'GET') {
+    // Pi owns provider credentials. agent-os is always ready.
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ configured: await isConfigured() }));
+    res.end(JSON.stringify({ configured: true }));
     return;
   }
 
   if (pathname === '/api/onboarding' && req.method === 'POST') {
-    const body = (await readJson(req)) as Record<string, unknown>;
-    const provider = body.provider;
-    if (provider !== 'fireworks' && provider !== 'zai') {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({ error: "provider must be 'fireworks' or 'zai'" }),
-      );
-      return;
-    }
-    await onboard(
-      body as {
-        provider: 'fireworks' | 'zai';
-        apiKey: string;
-        defaultModel: string;
-      },
-    );
+    // No-op, kept for backward compatibility with older web clients.
+    await ensureConfig();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
 
   if (pathname === '/api/config' && req.method === 'GET') {
-    const config = await readGlobalConfig();
-    if (!config) {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not configured' }));
-      return;
-    }
+    const config = (await readGlobalConfig()) ?? (await ensureConfig());
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
-        provider: config.provider,
-        apiKey: maskApiKey(config.apiKey),
-        defaultModel: config.defaultModel,
+        ...(config.defaultModel ? { defaultModel: config.defaultModel } : {}),
         ...(config.reminders ? { reminders: config.reminders } : {}),
       }),
     );
@@ -152,22 +131,9 @@ async function handle(
   if (pathname === '/api/config' && req.method === 'PATCH') {
     const body = (await readJson(req)) as Record<string, unknown>;
     const patch: {
-      provider?: 'fireworks' | 'zai';
-      apiKey?: string;
       defaultModel?: string;
       reminders?: string[];
     } = {};
-    if (body.provider !== undefined) {
-      if (body.provider !== 'fireworks' && body.provider !== 'zai') {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({ error: "provider must be 'fireworks' or 'zai'" }),
-        );
-        return;
-      }
-      patch.provider = body.provider as 'fireworks' | 'zai';
-    }
-    if (typeof body.apiKey === 'string') patch.apiKey = body.apiKey;
     if (typeof body.defaultModel === 'string')
       patch.defaultModel = body.defaultModel;
     if (body.reminders !== undefined) {
@@ -183,9 +149,7 @@ async function handle(
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
-        provider: updated.provider,
-        apiKey: maskApiKey(updated.apiKey),
-        defaultModel: updated.defaultModel,
+        ...(updated.defaultModel ? { defaultModel: updated.defaultModel } : {}),
         ...(updated.reminders ? { reminders: updated.reminders } : {}),
       }),
     );
@@ -895,13 +859,6 @@ function readBuffer(req: IncomingMessage): Promise<Buffer> {
     });
     req.on('error', reject);
   });
-}
-
-function maskApiKey(key: string): string {
-  if (key.length <= 4) {
-    return '•'.repeat(key.length);
-  }
-  return `••••${key.slice(-4)}`;
 }
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;

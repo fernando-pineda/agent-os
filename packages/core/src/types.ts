@@ -1,7 +1,5 @@
 export interface GlobalConfig {
-  provider: 'fireworks' | 'zai';
-  apiKey: string;
-  defaultModel: string;
+  defaultModel?: string;
   createdAt: string;
   mcpServers?: McpServerConfig[];
   reminders?: string[];

@@ -1,73 +1,52 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { getModels, postOnboarding } from '@/lib/api';
 import type { ModelItem } from '@/lib/types';
 
-type Provider = 'fireworks' | 'zai';
-
-const PROVIDERS: { value: Provider; label: string; placeholder: string }[] = [
-  { value: 'fireworks', label: 'Fireworks', placeholder: 'fw-...' },
-  { value: 'zai', label: 'z.ai', placeholder: 'zai-...' },
-];
-
 export function Onboarding({ onDone }: { onDone: () => void }) {
-  const [provider, setProvider] = useState<Provider>('fireworks');
-  const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState('');
   const [models, setModels] = useState<ModelItem[]>([]);
   const [modelError, setModelError] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const currentPlaceholder =
-    PROVIDERS.find((p) => p.value === provider)?.placeholder ?? '';
-
-  async function verifyKey() {
-    if (!apiKey.trim()) return;
-    setLoading(true);
-    setModelError(false);
-    try {
-      const list = await getModels();
-      setModels(list);
-      if (list.length > 0 && !defaultModel) {
-        setDefaultModel(list[0].id);
-      }
-    } catch {
-      setModelError(true);
-      setModels([]);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    let active = true;
+    getModels()
+      .then((list) => {
+        if (!active) return;
+        setModels(list);
+        setDefaultModel((current) => current || list[0]?.id || '');
+      })
+      .catch((err) => {
+        if (!active) return;
+        setModelError(true);
+        setError(err instanceof Error ? err.message : 'Failed to load models');
+      })
+      .finally(() => {
+        if (active) setModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function submit() {
-    if (!apiKey.trim() || !defaultModel.trim()) return;
-    setLoading(true);
+    setSaving(true);
     setError(null);
     try {
-      await postOnboarding({
-        provider,
-        apiKey: apiKey.trim(),
-        defaultModel: defaultModel.trim(),
-      });
+      const model = defaultModel.trim();
+      await postOnboarding(model ? { defaultModel: model } : {});
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Onboarding failed');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
-  }
-
-  function handleProviderChange(next: Provider) {
-    setProvider(next);
-    setApiKey('');
-    setDefaultModel('');
-    setModels([]);
-    setModelError(false);
   }
 
   return (
@@ -77,56 +56,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           agent-os
         </h1>
         <p className="mb-6 text-sm text-zinc-400">
-          Enter your API key to configure the supervisor.
+          Choose a default model for the supervisor.
         </p>
 
         <div className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-zinc-400">
-              Provider
-            </label>
-            <div className="flex gap-2">
-              {PROVIDERS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => handleProviderChange(p.value)}
-                  className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                    provider === p.value
-                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-zinc-400">
-              API key
-            </label>
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={currentPlaceholder}
-              className="border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600"
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={verifyKey}
-              disabled={!apiKey.trim() || loading}
-              className="border-zinc-700 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
-            >
-              {loading && models.length === 0 ? 'Loading...' : 'Check key'}
-            </Button>
-          </div>
-
           {modelError && (
             <p className="text-xs text-zinc-500">
               Could not load models. You can still enter a model ID manually.
@@ -137,19 +70,15 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             models={models}
             value={defaultModel}
             onChange={setDefaultModel}
-            loading={loading && models.length === 0}
+            loading={modelsLoading}
             allowManual={modelError || models.length === 0}
             placeholder="Select a model"
           />
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
-          <Button
-            onClick={submit}
-            disabled={!apiKey.trim() || !defaultModel.trim() || loading}
-            className="w-full"
-          >
-            {loading ? 'Saving...' : 'Continue'}
+          <Button onClick={submit} disabled={saving} className="w-full">
+            {saving ? 'Saving...' : 'Continue'}
           </Button>
         </div>
       </div>

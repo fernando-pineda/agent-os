@@ -387,7 +387,7 @@ const ComposerAction: FC = () => {
   const agent = agents.find((a) => a.id === selectedAgentId);
   const u = selectedAgentId ? usage[selectedAgentId] : undefined;
   const contextWindow =
-    models.find((m) => m.id === agent?.model)?.contextLength ?? 262144;
+    models.find((m) => m.id === agent?.model)?.contextWindow ?? 262144;
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex items-center gap-2">

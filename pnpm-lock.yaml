@@ -63,6 +63,9 @@ importers:
       '@agent-os/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.84.4
+        version: 0.84.4(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
     devDependencies:
       '@types/node':
         specifier: ^22
