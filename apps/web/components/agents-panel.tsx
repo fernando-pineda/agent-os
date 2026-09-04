@@ -792,6 +792,9 @@ export function AgentsPanel() {
       setSelectedSubagents([]);
     } catch (err) {
       console.error(err);
+      window.alert(
+        `Failed to create agent: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setCreating(false);
     }

@@ -639,8 +639,9 @@ export function SubagentPanel({
         onOpenChange={(open) => {
           if (!open) setSelectedRunId(null);
         }}
+        swipeDirection="right"
       >
-        <DrawerContent className="flex max-w-md flex-col">
+        <DrawerContent className="max-w-md">
           <DrawerHeader className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {selectedRun && (

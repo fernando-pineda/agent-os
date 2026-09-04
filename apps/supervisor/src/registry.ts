@@ -29,6 +29,7 @@ const REGISTRY_PATH = join(homedir(), '.agent-os', 'registry.json');
 const DEFAULT_PLUGINS = ['open-computer-use'];
 const DEFAULT_KASM_IMAGE = 'kasmweb/ubuntu-jammy-desktop:1.19.0';
 const DOCKER_COMMAND_TIMEOUT_MS = 30_000;
+const DOCKER_PULL_TIMEOUT_MS = 300_000;
 
 export interface RegistryEntry {
   id: string;
@@ -606,11 +607,23 @@ function runDockerCommand(
   args: string[],
   allowMissing: boolean,
 ): Promise<string> {
+  return runDockerCommandWithTimeout(
+    args,
+    allowMissing,
+    DOCKER_COMMAND_TIMEOUT_MS,
+  );
+}
+
+function runDockerCommandWithTimeout(
+  args: string[],
+  allowMissing: boolean,
+  timeoutMs: number,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       'docker',
       args,
-      { encoding: 'utf8', timeout: DOCKER_COMMAND_TIMEOUT_MS },
+      { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
           if (
@@ -834,6 +847,27 @@ async function spawnDockerContainer(
   const containerName = dockerContainerName(agentId);
   await removeDockerContainer(agentId);
   const vncPassword = randomUUID().replaceAll('-', '').slice(0, 12);
+  // Pull the image first with a longer timeout, so docker run starts
+  // instantly with the image already local instead of blocking on pull.
+  try {
+    await runDockerCommandWithTimeout(
+      ['pull', kasmImage],
+      false,
+      DOCKER_PULL_TIMEOUT_MS,
+    );
+  } catch (err) {
+    // If pull fails because image is already local, continue. If it fails
+    // for other reasons, docker run will surface the real error.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/manifest unknown|not found/i.test(msg)) {
+      // Image might already be local, or pull timed out. Try running anyway.
+      console.warn(
+        `docker pull ${kasmImage} failed, trying run directly: ${msg}`,
+      );
+    } else {
+      throw new Error(`Kasm image ${kasmImage} not found: ${msg}`);
+    }
+  }
   const stdout = await runDockerCommand(
     [
       'run',
@@ -898,12 +932,23 @@ async function spawnAgentProcess(
 
   let dockerResult: DockerSpawnResult | undefined;
   if (config.sandboxType === 'docker-desktop') {
-    const vncPort = await allocateVncPort(registry);
-    dockerResult = await spawnDockerContainer(
-      id,
-      vncPort,
-      config.kasmImage ?? DEFAULT_KASM_IMAGE,
-    );
+    try {
+      // Pre-flight: fail fast if Docker daemon is not running instead of
+      // hanging on docker run for 30s.
+      await runDockerCommand(['info', '--format', '{{.ServerVersion}}'], false);
+      const vncPort = await allocateVncPort(registry);
+      dockerResult = await spawnDockerContainer(
+        id,
+        vncPort,
+        config.kasmImage ?? DEFAULT_KASM_IMAGE,
+      );
+    } catch (err) {
+      console.error(
+        `Docker container spawn failed for ${id}, agent will run on host without a container:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      // Continue without a container; the agent process starts on the host.
+    }
   }
 
   const spawnOptions: {
