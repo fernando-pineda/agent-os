@@ -13,7 +13,6 @@ import {
 import {
   Drawer,
   DrawerContent,
-  DrawerDescription,
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
@@ -689,9 +688,6 @@ export function SubagentPanel({
           </DrawerHeader>
           {selectedRun && (
             <>
-              <DrawerDescription className="px-4 pb-2 text-zinc-400">
-                {selectedRun.task}
-              </DrawerDescription>
               <div className="flex items-center gap-4 border-b border-zinc-800 px-4 py-2 text-[0.7rem] text-zinc-500">
                 {selectedRun.model && (
                   <span className="truncate font-mono">
