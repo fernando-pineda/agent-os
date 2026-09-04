@@ -537,10 +537,10 @@ export function SubagentPanel({
       setRuns((current) =>
         current.filter((r) => {
           if (r.status === 'running') return true;
-          return Date.now() - r.startedAt < 60_000;
+          return Date.now() - r.startedAt < 300_000;
         }),
       );
-    }, 30_000);
+    }, 60_000);
     return () => clearTimeout(timer);
   }, [runs]);
 
