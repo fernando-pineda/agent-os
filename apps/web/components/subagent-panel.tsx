@@ -596,19 +596,36 @@ export function SubagentPanel({
     [agentId, stoppingRunId],
   );
 
-  // Auto-clear finished runs after 30s
+  // Purge strategy: keep max 5 finished runs, purge oldest beyond that.
+  // Also purge any finished run after 30s.
   useEffect(() => {
     if (runs.length === 0) return;
-    const hasFinished = runs.some((r) => r.status !== 'running');
-    if (!hasFinished) return;
+    const finished = runs.filter((r) => r.status !== 'running');
+    if (finished.length === 0) return;
+
     const timer = setTimeout(() => {
-      setRuns((current) =>
-        current.filter((r) => {
+      setRuns((current) => {
+        const now = Date.now();
+        // Purge finished runs older than 30s
+        let kept = current.filter((r) => {
           if (r.status === 'running') return true;
-          return Date.now() - r.startedAt < 300_000;
-        }),
-      );
-    }, 60_000);
+          return now - r.startedAt < 30_000;
+        });
+        // If still more than 5 finished, keep only the 5 newest
+        const stillFinished = kept.filter((r) => r.status !== 'running');
+        if (stillFinished.length > 5) {
+          const toRemove = new Set(
+            stillFinished
+              .sort((a, b) => b.startedAt - a.startedAt)
+              .slice(5)
+              .map((r) => r.runId),
+          );
+          kept = kept.filter((r) => !toRemove.has(r.runId));
+        }
+        return kept;
+      });
+    }, 5_000);
+
     return () => clearTimeout(timer);
   }, [runs]);
 
