@@ -186,8 +186,8 @@ function AgentForm({
         <TabsTab value="reminders">Reminders</TabsTab>
         <TabsIndicator />
       </TabsList>
-      <TabsPanel value="general">
-        <div className="space-y-4 overflow-y-auto p-0.5">
+      <TabsPanel value="general" className="min-h-0 flex-1 overflow-y-auto">
+        <div className="space-y-4 p-0.5">
           <div>
             <label className="mb-1 block text-xs text-zinc-400">Name</label>
             <Input
@@ -303,7 +303,7 @@ function AgentForm({
           </div>
         </div>
       </TabsPanel>
-      <TabsPanel value="automations">
+      <TabsPanel value="automations" className="min-h-0 flex-1 overflow-y-auto">
         {agentId ? (
           <AutomationsPanel agentId={agentId} />
         ) : (
@@ -312,7 +312,7 @@ function AgentForm({
           </div>
         )}
       </TabsPanel>
-      <TabsPanel value="plugins">
+      <TabsPanel value="plugins" className="min-h-0 flex-1 overflow-y-auto">
         {mcpLoading ? (
           <div className="py-6 text-center text-xs text-zinc-500">
             Loading...
@@ -350,7 +350,7 @@ function AgentForm({
           </div>
         )}
       </TabsPanel>
-      <TabsPanel value="subagents">
+      <TabsPanel value="subagents" className="min-h-0 flex-1 overflow-y-auto">
         {subagentsLoading ? (
           <div className="py-6 text-center text-xs text-zinc-500">
             Loading...
@@ -388,7 +388,7 @@ function AgentForm({
           </div>
         )}
       </TabsPanel>
-      <TabsPanel value="reminders">
+      <TabsPanel value="reminders" className="min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-3 py-2">
           <p className="text-xs text-zinc-500">
             Short texts injected into every agent turn. Agents consider them
