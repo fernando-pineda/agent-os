@@ -250,7 +250,7 @@ private final class HostDesktopBroker: NSObject, SCStreamOutput, SCStreamDelegat
     }
 
     private func preflightScreenRecording() {
-        let status = CGPreflightScreenCaptureAccess() ? "ready" : "blocked"
+        let status = CGRequestScreenCaptureAccess() ? "ready" : "blocked"
         let response = ScreenRecordingPreflight(status: status)
         do {
             output.write(

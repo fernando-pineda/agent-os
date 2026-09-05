@@ -51,7 +51,9 @@ const parsedOrigin = URL.canParse(configuredOrigin)
   : null;
 
 export const HOST_DESKTOP_ALLOWED_ORIGIN =
-  parsedOrigin !== null && isLocalWebOrigin(parsedOrigin)
+  parsedOrigin !== null &&
+  (process.env.AGENT_OS_WEB_ORIGIN !== undefined ||
+    isLocalWebOrigin(parsedOrigin))
     ? parsedOrigin.origin
     : null;
 

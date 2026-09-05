@@ -34,6 +34,9 @@ function resolveBase(): string {
     return process.env.NEXT_PUBLIC_SUPERVISOR_URL;
   }
   if (typeof window !== 'undefined' && window.location?.hostname) {
+    if (window.location.protocol === 'https:') {
+      return `https://${window.location.hostname}:8443`;
+    }
     return `http://${window.location.hostname}:8787`;
   }
   return 'http://localhost:8787';
