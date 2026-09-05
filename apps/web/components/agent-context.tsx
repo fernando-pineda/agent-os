@@ -83,6 +83,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       'path',
       `api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/websockify`,
     );
+    desktopUrl.searchParams.set('resize', 'scale');
     return { ...agent, desktopUrl: desktopUrl.toString() };
   }, []);
 
