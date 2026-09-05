@@ -17,6 +17,7 @@ import {
 } from '@/components/agent-context';
 import { AutomationsPanel } from '@/components/automations-panel';
 import { ModelPickerModal } from '@/components/model-picker-modal';
+import { ReasoningLevelSelect } from '@/components/reasoning-level-select';
 import { RemindersEditor } from '@/components/reminders-editor';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { Button } from '@/components/ui/button';
@@ -70,6 +71,7 @@ import type {
   AgentStatus,
   McpServerConfig,
   ModelItem,
+  ReasoningLevel,
   SubagentConfig,
 } from '@/lib/types';
 
@@ -117,6 +119,7 @@ function AgentForm({
   name,
   role,
   model,
+  reasoningLevel,
   character,
   color,
   instructions,
@@ -126,6 +129,7 @@ function AgentForm({
   onName,
   onRole,
   onModel,
+  onReasoningLevel,
   onCharacter,
   onColor,
   onInstructions,
@@ -148,6 +152,7 @@ function AgentForm({
   name: string;
   role: string;
   model: string;
+  reasoningLevel: string;
   character: string;
   color: string;
   instructions: string;
@@ -157,6 +162,7 @@ function AgentForm({
   onName: (v: string) => void;
   onRole: (v: string) => void;
   onModel: (v: string) => void;
+  onReasoningLevel: (v: string) => void;
   onCharacter: (c: string) => void;
   onColor: (c: string) => void;
   onInstructions: (v: string) => void;
@@ -197,14 +203,22 @@ function AgentForm({
               className="border-zinc-800 bg-zinc-950 text-zinc-100"
             />
           </div>
-          <ModelPickerModal
-            models={models}
-            value={model}
-            onChange={onModel}
-            loading={loadingModels}
-            allowManual={models.length === 0}
-            placeholder="Default"
-          />
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1">
+              <ModelPickerModal
+                models={models}
+                value={model}
+                onChange={onModel}
+                loading={loadingModels}
+                allowManual={models.length === 0}
+                placeholder="Default"
+              />
+            </div>
+            <ReasoningLevelSelect
+              value={reasoningLevel}
+              onChange={(v) => onReasoningLevel(v ?? '')}
+            />
+          </div>
           <AvatarPicker
             character={character}
             color={color}
@@ -647,6 +661,7 @@ export function AgentsPanel() {
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [model, setModel] = useState('');
+  const [reasoningLevel, setReasoningLevel] = useState('');
   const [instructions, setInstructions] = useState('');
   const [reminders, setReminders] = useState<string[]>([]);
   const [character, setCharacter] = useState(AGENT_CHARACTERS[0]);
@@ -752,6 +767,7 @@ export function AgentsPanel() {
       name: string;
       role?: string;
       model?: string;
+      reasoningLevel?: ReasoningLevel;
       sandboxType?: 'host' | 'docker-desktop';
       kasmImage?: string;
       instructions?: string;
@@ -767,6 +783,8 @@ export function AgentsPanel() {
     };
     if (role.trim()) payload.role = role.trim();
     if (model.trim()) payload.model = model.trim();
+    if (reasoningLevel.trim())
+      payload.reasoningLevel = reasoningLevel.trim() as ReasoningLevel;
     if (sandboxType === 'docker-desktop') {
       payload.sandboxType = 'docker-desktop';
       payload.kasmImage = kasmImage;
@@ -778,6 +796,7 @@ export function AgentsPanel() {
     setName('');
     setRole('');
     setModel('');
+    setReasoningLevel('');
     setInstructions('');
     setReminders([]);
     setCharacter(AGENT_CHARACTERS[0]);
@@ -797,6 +816,7 @@ export function AgentsPanel() {
     name,
     role,
     model,
+    reasoningLevel,
     instructions,
     character,
     color,
@@ -904,6 +924,7 @@ export function AgentsPanel() {
   const [editInstructions, setEditInstructions] = useState('');
   const [editReminders, setEditReminders] = useState<string[]>([]);
   const [editModel, setEditModel] = useState('');
+  const [editReasoningLevel, setEditReasoningLevel] = useState('');
   const [editCharacter, setEditCharacter] = useState<string>(
     AGENT_CHARACTERS[0],
   );
@@ -929,6 +950,7 @@ export function AgentsPanel() {
         name: editName.trim() || undefined,
         role: editRole.trim() || undefined,
         model: editModel.trim() || undefined,
+        reasoningLevel: (editReasoningLevel || null) as ReasoningLevel | null,
         sandboxType: editSandboxType,
         ...(editSandboxType === 'docker-desktop'
           ? { kasmImage: editKasmImage }
@@ -951,6 +973,7 @@ export function AgentsPanel() {
     editName,
     editRole,
     editModel,
+    editReasoningLevel,
     editSandboxType,
     editKasmImage,
     editInstructions,
@@ -981,6 +1004,7 @@ export function AgentsPanel() {
     editRole,
     editInstructions,
     editModel,
+    editReasoningLevel,
     editSandboxType,
     editKasmImage,
     editCharacter,
@@ -1009,6 +1033,7 @@ export function AgentsPanel() {
       setEditInstructions(agent.instructions ?? '');
       setEditReminders(agent.reminders ?? []);
       setEditModel(agent.model);
+      setEditReasoningLevel(agent.reasoningLevel ?? '');
       setEditCharacter(agent.avatar?.character ?? AGENT_CHARACTERS[0]);
       setEditColor(agent.avatar?.color ?? AGENT_AVATAR_DEFAULT_COLOR);
       setEditSandboxType(agent.sandboxType ?? 'host');
@@ -1063,6 +1088,7 @@ export function AgentsPanel() {
               name={name}
               role={role}
               model={model}
+              reasoningLevel={reasoningLevel}
               character={character}
               color={color}
               instructions={instructions}
@@ -1071,6 +1097,7 @@ export function AgentsPanel() {
               onName={setName}
               onRole={setRole}
               onModel={setModel}
+              onReasoningLevel={setReasoningLevel}
               onCharacter={setCharacter}
               onColor={setColor}
               onInstructions={setInstructions}
@@ -1250,6 +1277,7 @@ export function AgentsPanel() {
             name={editName}
             role={editRole}
             model={editModel}
+            reasoningLevel={editReasoningLevel}
             character={editCharacter}
             color={editColor}
             instructions={editInstructions}
@@ -1259,6 +1287,7 @@ export function AgentsPanel() {
             onName={setEditName}
             onRole={setEditRole}
             onModel={setEditModel}
+            onReasoningLevel={setEditReasoningLevel}
             onCharacter={setEditCharacter}
             onColor={setEditColor}
             onInstructions={setEditInstructions}

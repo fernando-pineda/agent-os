@@ -12,6 +12,7 @@ import {
   type AgentAvatar,
   type AgentInfo,
   type McpServerConfig,
+  type ReasoningLevel,
 } from '@agent-os/core';
 import { createGroup, deleteGroup, loadGroups } from './groups.js';
 import {
@@ -444,6 +445,8 @@ async function handle(
     if (typeof body.workspace === 'string') input.workspace = body.workspace;
     if (typeof body.role === 'string') input.role = body.role;
     if (typeof body.model === 'string') input.model = body.model;
+    if (typeof body.reasoningLevel === 'string')
+      input.reasoningLevel = body.reasoningLevel as ReasoningLevel;
     if (typeof body.sandboxed === 'boolean') input.sandboxed = body.sandboxed;
     if (body.sandboxType === 'host' || body.sandboxType === 'docker-desktop') {
       input.sandboxType = body.sandboxType;
@@ -525,6 +528,13 @@ async function handle(
     if (typeof body.instructions === 'string')
       patch.instructions = body.instructions;
     if (typeof body.model === 'string') patch.model = body.model;
+    if (body.reasoningLevel !== undefined) {
+      if (body.reasoningLevel === null) {
+        patch.reasoningLevel = null;
+      } else if (typeof body.reasoningLevel === 'string') {
+        patch.reasoningLevel = body.reasoningLevel as ReasoningLevel;
+      }
+    }
     if (typeof body.workspace === 'string') patch.workspace = body.workspace;
     if (typeof body.sandboxed === 'boolean') patch.sandboxed = body.sandboxed;
     if (body.sandboxType === 'host' || body.sandboxType === 'docker-desktop') {

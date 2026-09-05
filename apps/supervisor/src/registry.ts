@@ -20,6 +20,7 @@ import type {
   AgentInfo,
   AgentStatus,
   ContainerStatus,
+  ReasoningLevel,
 } from '@agent-os/core';
 import { uninstallLaunchdAgent } from './launchd.js';
 import { listMcpServers } from './mcps.js';
@@ -149,6 +150,7 @@ export interface CreateAgentInput {
   workspace?: string | undefined;
   role?: string | undefined;
   model?: string | undefined;
+  reasoningLevel?: ReasoningLevel | undefined;
   sandboxed?: boolean | undefined;
   sandboxType?: AgentConfig['sandboxType'];
   kasmImage?: string | undefined;
@@ -175,6 +177,7 @@ export interface AgentConfigPatch {
   group?: string | undefined;
   role?: string | undefined;
   model?: string | undefined;
+  reasoningLevel?: ReasoningLevel | null | undefined;
   workspace?: string | undefined;
   sandboxed?: boolean | undefined;
   sandboxType?: AgentConfig['sandboxType'];
@@ -208,6 +211,13 @@ export async function updateAgentConfig(
     config.model = patch.model;
     const vision = await resolveModelVision(patch.model);
     if (vision !== undefined) config.supportsVision = vision;
+  }
+  if (patch.reasoningLevel !== undefined) {
+    if (patch.reasoningLevel === null) {
+      delete config.reasoningLevel;
+    } else {
+      config.reasoningLevel = patch.reasoningLevel;
+    }
   }
   if (patch.sandboxed !== undefined) config.sandboxed = patch.sandboxed;
   if (patch.sandboxType !== undefined) config.sandboxType = patch.sandboxType;
@@ -313,6 +323,7 @@ export async function createAgent(
     const vision = await resolveModelVision(input.model);
     if (vision !== undefined) config.supportsVision = vision;
   }
+  if (input.reasoningLevel) config.reasoningLevel = input.reasoningLevel;
   if (input.sandboxed) config.sandboxed = input.sandboxed;
   if (input.sandboxType !== undefined) config.sandboxType = input.sandboxType;
   if (input.kasmImage !== undefined) config.kasmImage = input.kasmImage;
@@ -1098,6 +1109,7 @@ export function toAgentInfo(
     status,
     workspace: config.workspace ?? config.id,
     model: config.model ?? defaultModel,
+    ...(config.reasoningLevel ? { reasoningLevel: config.reasoningLevel } : {}),
     tmuxSession: `agent-os-${config.id}`,
   };
   if (config.group) {

@@ -19,6 +19,15 @@ export type ContainerStatus =
   | 'running'
   | 'failed';
 
+export type ReasoningLevel =
+  | 'off'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
+
 export interface AgentInfo {
   id: string;
   name: string;
@@ -27,6 +36,7 @@ export interface AgentInfo {
   role?: string;
   status: AgentStatus;
   model: string;
+  reasoningLevel?: ReasoningLevel;
   tmuxSession: string;
   currentTaskId?: string;
   lastEventAt?: string;
@@ -72,6 +82,7 @@ export interface CreateAgentPayload {
   workspace?: string;
   role?: string;
   model?: string;
+  reasoningLevel?: ReasoningLevel;
   sandboxType?: 'host' | 'docker-desktop';
   kasmImage?: string;
   avatar?: AgentAvatar;
@@ -86,6 +97,7 @@ export interface UpdateAgentPayload {
   workspace?: string;
   role?: string;
   model?: string;
+  reasoningLevel?: ReasoningLevel | null;
   sandboxType?: 'host' | 'docker-desktop';
   kasmImage?: string;
   sandboxed?: boolean;

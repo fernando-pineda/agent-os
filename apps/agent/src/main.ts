@@ -260,6 +260,7 @@ async function createSession(
   );
   const sessionConfig: PiSessionConfig = {
     model: config.model,
+    ...(config.reasoningLevel ? { reasoningLevel: config.reasoningLevel } : {}),
     homeDir,
     cwd: homeDir,
     tools,

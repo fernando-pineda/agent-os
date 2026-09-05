@@ -29,6 +29,7 @@ import type {
 
 export interface PiSessionConfig {
   model: string;
+  reasoningLevel?: string;
   homeDir: string;
   cwd: string;
   tools: Tool[];
@@ -379,6 +380,16 @@ export async function createPiSession(
     sessionManager,
     settingsManager,
   });
+
+  if (config.reasoningLevel) {
+    try {
+      (
+        session as unknown as { setThinkingLevel: (level: string) => void }
+      ).setThinkingLevel(config.reasoningLevel);
+    } catch {
+      // Level not supported by the model; Pi clamps automatically.
+    }
+  }
 
   return {
     session,

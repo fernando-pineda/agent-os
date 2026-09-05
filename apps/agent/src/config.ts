@@ -7,6 +7,7 @@ export interface LoadedAgentConfig {
   config: GlobalConfig;
   agent: AgentConfig;
   model: string;
+  reasoningLevel: string | undefined;
   workspace: string;
   homeDir: string;
 }
@@ -59,7 +60,8 @@ export async function loadAgentConfig(
     process.env.AGENT_OS_HOME ??
     join(homedir(), '.agent-os', 'dev-homes', workspace);
   const model = agent.model ?? config.defaultModel ?? '';
-  return { config, agent, model, workspace, homeDir };
+  const reasoningLevel = agent.reasoningLevel;
+  return { config, agent, model, reasoningLevel, workspace, homeDir };
 }
 
 // Re-reads the agent config each call so edits (reminders, model, etc.) made

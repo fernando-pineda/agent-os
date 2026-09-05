@@ -35,6 +35,15 @@ export interface AgentAvatar {
   color: string;
 }
 
+export type ReasoningLevel =
+  | 'off'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
+
 export interface AgentConfig {
   id: string;
   name: string;
@@ -42,6 +51,7 @@ export interface AgentConfig {
   workspace?: string;
   role?: string;
   model?: string;
+  reasoningLevel?: ReasoningLevel;
   supportsVision?: boolean;
   git?: {
     userName?: string;
@@ -83,6 +93,7 @@ export interface AgentInfo {
   role?: string;
   status: AgentStatus;
   model: string;
+  reasoningLevel?: ReasoningLevel;
   tmuxSession: string;
   currentTaskId?: string;
   lastEventAt?: string;
