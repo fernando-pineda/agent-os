@@ -689,16 +689,16 @@ export function SubagentPanel({
             </button>
           </div>
         )}
-        {runs.length > 0 && (
-          <div className="mx-2 rounded-lg border border-zinc-800">
-            <div className="border-b border-zinc-800 px-3 py-2">
-              <div className="text-xs font-medium text-zinc-300">Subagents</div>
+        <div className="mx-2 rounded-lg border border-zinc-800">
+          <div className="border-b border-zinc-800 px-3 py-2">
+            <div className="text-xs font-medium text-zinc-300">Subagents</div>
+          </div>
+          {streamError && (
+            <div className="border-b border-red-900/50 px-2.5 py-1.5 text-[0.65rem] text-red-300">
+              {streamError}
             </div>
-            {streamError && (
-              <div className="border-b border-red-900/50 px-2.5 py-1.5 text-[0.65rem] text-red-300">
-                {streamError}
-              </div>
-            )}
+          )}
+          {runs.length > 0 ? (
             <div className="flex flex-col gap-px p-1.5">
               {runs.map((run) => (
                 <MiniRunCard
@@ -710,8 +710,12 @@ export function SubagentPanel({
                 />
               ))}
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="px-3 py-4 text-center text-[0.65rem] text-zinc-600">
+              No active subagents
+            </div>
+          )}
+        </div>
       </aside>
 
       {desktopExpanded && resolvedDesktopUrl && (
