@@ -6,6 +6,7 @@ import type { TextMessagePartProps } from '@assistant-ui/react';
 import {
   type CodeHeaderProps,
   MarkdownTextPrimitive,
+  type SyntaxHighlighterProps,
   unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
   useIsMarkdownCodeBlock,
 } from '@assistant-ui/react-markdown';
@@ -14,6 +15,7 @@ import { type FC, memo, useMemo, useRef } from 'react';
 import remarkGfm from 'remark-gfm';
 
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button';
+import { WidgetFrame } from '@/components/assistant-ui/widget';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { cn } from '@/lib/utils';
 
@@ -52,6 +54,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
       remarkPlugins={[remarkGfm]}
       className="aui-md"
       components={markdownComponents}
+      componentsByLanguage={componentsByLanguage}
       defer
     />
   );
@@ -81,6 +84,19 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
       </TooltipIconButton>
     </div>
   );
+};
+
+const WidgetSyntaxHighlighter: FC<SyntaxHighlighterProps> = ({ code }) => (
+  <WidgetFrame html={code} />
+);
+
+const WidgetCodeHeader: FC<CodeHeaderProps> = () => null;
+
+const componentsByLanguage = {
+  'html-widget': {
+    CodeHeader: WidgetCodeHeader,
+    SyntaxHighlighter: WidgetSyntaxHighlighter,
+  },
 };
 
 const defaultComponents = memoizeMarkdownComponents({

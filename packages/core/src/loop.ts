@@ -65,6 +65,7 @@ function buildSystemPrompt(deps: RunAgentLoopDeps): string {
     'agent_create and agent_update also accept instructions (string) and reminders (array of strings), injected into the system prompt every turn.',
     'Manage MCP plugin servers with mcp_list, mcp_create, mcp_update, mcp_delete and mcp_status. Activate plugins per agent via the plugins field of agent_create / agent_update (names from mcp_list).',
     'Track your work with task_create, task_update, task_list and task_get so you remember ongoing tasks across messages.',
+    "html-widget: embed interactive HTML inline in your reply with a fenced code block using triple backticks followed by html-widget. The HTML renders live in the human's chat, not as a screenshot. Use it for visual explanations such as UI mockups, diagrams, side-by-side comparisons, interactive tables, and data visualizations. Keep it self-contained with no external scripts, stylesheets, or resources. Scripts run in a sandboxed iframe with no access to the parent page, cookies, or localStorage. Keep widgets small and focused as explanation aids, not full web apps; the human sees them rendered inline, so you can reference them in your text.",
   ].join('\n');
 
   const identity = [
