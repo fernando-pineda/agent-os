@@ -856,18 +856,12 @@ async function spawnDockerContainer(
   await removeDockerContainer(agentId);
   const vncPassword = randomUUID().replaceAll('-', '').slice(0, 12);
   try {
+    await runDockerCommand(['image', 'inspect', kasmImage], false);
+  } catch {
     await runDockerCommandWithTimeout(
       ['pull', kasmImage],
       false,
       DOCKER_PULL_TIMEOUT_MS,
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/manifest unknown|not found/i.test(msg)) {
-      throw new Error(`Kasm image ${kasmImage} not found: ${msg}`);
-    }
-    console.warn(
-      `docker pull ${kasmImage} failed, trying run directly: ${msg}`,
     );
   }
   const stdout = await runDockerCommand(
