@@ -1,6 +1,12 @@
 'use client';
 
-import { SquareIcon, XIcon, ChevronRightIcon } from 'lucide-react';
+import {
+  Loader2Icon,
+  Maximize2Icon,
+  SquareIcon,
+  XIcon,
+  ChevronRightIcon,
+} from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -527,13 +533,24 @@ function ReadOnlyRunView({
 
 export function SubagentPanel({
   agentId,
+  desktopUrl,
+  desktopPort,
 }: {
   agentId: string | null;
+  desktopUrl?: string;
+  desktopPort?: number;
 }): ReactNode {
   const [runs, setRuns] = useState<ActiveSubagentRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [desktopExpanded, setDesktopExpanded] = useState(false);
+
+  const resolvedDesktopUrl =
+    desktopUrl ??
+    (desktopPort !== undefined
+      ? `https://localhost:${desktopPort}`
+      : undefined);
 
   useEffect(() => {
     setRuns([]);
@@ -634,7 +651,7 @@ export function SubagentPanel({
     [runs, selectedRunId],
   );
 
-  if (runs.length === 0) {
+  if (runs.length === 0 && !resolvedDesktopUrl) {
     return (
       <aside className="hidden w-56 flex-shrink-0 py-2 md:flex md:flex-col">
         <div className="mx-2 rounded-lg border border-zinc-800">
@@ -652,28 +669,82 @@ export function SubagentPanel({
   return (
     <>
       <aside className="hidden w-56 flex-shrink-0 py-2 md:flex md:flex-col">
-        <div className="mx-2 rounded-lg border border-zinc-800">
-          <div className="border-b border-zinc-800 px-3 py-2">
-            <div className="text-xs font-medium text-zinc-300">Subagents</div>
-          </div>
-          {streamError && (
-            <div className="border-b border-red-900/50 px-2.5 py-1.5 text-[0.65rem] text-red-300">
-              {streamError}
-            </div>
-          )}
-          <div className="flex flex-col gap-px p-1.5">
-            {runs.map((run) => (
-              <MiniRunCard
-                key={run.runId}
-                run={run}
-                stopping={stoppingRunId === run.runId}
-                onOpen={() => setSelectedRunId(run.runId)}
-                onStop={() => void onStop(run.runId)}
+        {resolvedDesktopUrl && (
+          <div className="mx-2 mb-2 overflow-hidden rounded-lg border border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setDesktopExpanded(true)}
+              className="group relative block w-full"
+            >
+              <iframe
+                src={resolvedDesktopUrl}
+                title="Desktop preview"
+                className="pointer-events-none h-32 w-full border-0"
+                scrolling="no"
+                tabIndex={-1}
               />
-            ))}
+              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+                <Maximize2Icon className="size-5 text-zinc-200" />
+              </div>
+            </button>
           </div>
-        </div>
+        )}
+        {runs.length > 0 && (
+          <div className="mx-2 rounded-lg border border-zinc-800">
+            <div className="border-b border-zinc-800 px-3 py-2">
+              <div className="text-xs font-medium text-zinc-300">Subagents</div>
+            </div>
+            {streamError && (
+              <div className="border-b border-red-900/50 px-2.5 py-1.5 text-[0.65rem] text-red-300">
+                {streamError}
+              </div>
+            )}
+            <div className="flex flex-col gap-px p-1.5">
+              {runs.map((run) => (
+                <MiniRunCard
+                  key={run.runId}
+                  run={run}
+                  stopping={stoppingRunId === run.runId}
+                  onOpen={() => setSelectedRunId(run.runId)}
+                  onStop={() => void onStop(run.runId)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </aside>
+
+      {desktopExpanded && resolvedDesktopUrl && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+          <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-3 py-2">
+            <span className="text-xs font-medium text-zinc-300">Desktop</span>
+            <div className="flex items-center gap-2">
+              <a
+                href={resolvedDesktopUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[0.7rem] text-zinc-400 underline underline-offset-2 hover:text-zinc-100"
+              >
+                Open in new tab
+              </a>
+              <button
+                type="button"
+                onClick={() => setDesktopExpanded(false)}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              >
+                <XIcon className="size-4" />
+              </button>
+            </div>
+          </div>
+          <iframe
+            src={resolvedDesktopUrl}
+            title="Agent desktop"
+            className="h-full min-h-0 w-full flex-1 border-0"
+            allow="autoplay; clipboard-read; clipboard-write; microphone; camera; fullscreen"
+            allowFullScreen
+          />
+        </div>
+      )}
 
       {/* Read-only detail drawer */}
       <Drawer

@@ -2,25 +2,15 @@
 
 import { Loader2Icon, MenuIcon, PanelLeftCloseIcon } from 'lucide-react';
 import type { ReactElement } from 'react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAgentSelection, useAgentsFeed } from '@/components/agent-context';
 import { AgentsPanel } from '@/components/agents-panel';
 import { Thread } from '@/components/assistant-ui/thread';
-import { DesktopView } from '@/components/desktop-view';
 import { SubagentPanel } from '@/components/subagent-panel';
 import { Button } from '@/components/ui/button';
-import {
-  Tabs,
-  TabsIndicator,
-  TabsList,
-  TabsPanel,
-  TabsTab,
-} from '@/components/ui/tabs';
 import { avatarImagePath, avatarTileBackground } from '@/lib/avatars';
 import { RuntimeProvider } from '@/lib/runtime';
 import type { AgentInfo } from '@/lib/types';
-
-type ChatTab = 'chat' | 'desktop';
 
 type AgentWithDesktopPort = {
   desktopPort: number;
@@ -38,7 +28,6 @@ export function ChatShell(): ReactElement {
   const agents = useAgentsFeed();
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ChatTab>('chat');
   const desktopPort =
     selectedAgent !== undefined && hasDesktopPort(selectedAgent)
       ? selectedAgent.desktopPort
@@ -49,18 +38,6 @@ export function ChatShell(): ReactElement {
       : undefined;
 
   const containerStatus = selectedAgent?.containerStatus;
-
-  useEffect((): void => {
-    if (selectedAgentId === null || desktopPort === undefined) {
-      setActiveTab('chat');
-    }
-  }, [desktopPort, selectedAgentId]);
-
-  const handleTabChange = (value: string | null): void => {
-    if (value === 'chat' || value === 'desktop') {
-      setActiveTab(value);
-    }
-  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
@@ -149,38 +126,18 @@ export function ChatShell(): ReactElement {
                     running.
                   </p>
                 </div>
-              ) : desktopPort === undefined ? (
-                <Thread />
               ) : (
-                <Tabs
-                  value={activeTab}
-                  onValueChange={handleTabChange}
-                  className="flex h-full flex-col"
-                >
-                  <TabsList className="shrink-0 px-2">
-                    <TabsTab value="chat">Chat</TabsTab>
-                    <TabsTab value="desktop">Desktop</TabsTab>
-                    <TabsIndicator />
-                  </TabsList>
-                  <TabsPanel
-                    value="chat"
-                    className="min-h-0 flex-1 overflow-hidden"
-                  >
-                    <Thread />
-                  </TabsPanel>
-                  <TabsPanel
-                    value="desktop"
-                    className="min-h-0 flex-1 overflow-hidden"
-                  >
-                    <DesktopView desktopUrl={desktopUrl} port={desktopPort} />
-                  </TabsPanel>
-                </Tabs>
+                <Thread />
               )}
             </RuntimeProvider>
           )}
         </div>
       </main>
-      <SubagentPanel agentId={selectedAgentId} />
+      <SubagentPanel
+        agentId={selectedAgentId}
+        desktopUrl={desktopUrl}
+        desktopPort={desktopPort}
+      />
     </div>
   );
 }
