@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { connect as netConnect } from 'node:net';
 import { URL } from 'node:url';
 import {
@@ -677,37 +678,37 @@ async function handle(
     headers['authorization'] = authHeader;
     headers['host'] = `localhost:${entry.vncPort}`;
 
-    const proxyReq = await fetch(target, {
+    const proxyReq = httpsRequest(target, {
       method: req.method ?? 'GET',
       headers,
-      ...(req.method !== 'GET' && req.method !== 'HEAD' ? { body: req } : {}),
-      redirect: 'manual',
+      rejectUnauthorized: false,
     });
 
-    const respHeaders: Record<string, string> = {};
-    proxyReq.headers.forEach((val, key) => {
-      if (
-        key.toLowerCase() === 'transfer-encoding' ||
-        key.toLowerCase() === 'connection'
-      )
-        return;
-      respHeaders[key] = val;
+    proxyReq.on('response', (proxyRes) => {
+      const respHeaders: Record<string, string> = {};
+      for (const [key, val] of Object.entries(proxyRes.headers)) {
+        if (
+          key.toLowerCase() === 'transfer-encoding' ||
+          key.toLowerCase() === 'connection'
+        )
+          continue;
+        if (typeof val === 'string') respHeaders[key] = val;
+      }
+      res.writeHead(proxyRes.statusCode ?? 200, respHeaders);
+      proxyRes.pipe(res);
     });
-    res.writeHead(proxyReq.status, respHeaders);
-    if (proxyReq.body) {
-      const reader = proxyReq.body.getReader();
-      const pump = async (): Promise<void> => {
-        const { done, value } = await reader.read();
-        if (done) {
-          res.end();
-          return;
-        }
-        res.write(value);
-        return pump();
-      };
-      await pump();
+
+    proxyReq.on('error', (err) => {
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      req.pipe(proxyReq);
     } else {
-      res.end();
+      proxyReq.end();
     }
     return;
   }
