@@ -4,7 +4,7 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { connect as netConnect } from 'node:net';
+import { connect as tlsConnect } from 'node:tls';
 import { URL } from 'node:url';
 import {
   AGENT_AVATAR_DEFAULT_COLOR,
@@ -1414,7 +1414,11 @@ async function handleDesktopUpgrade(
   }
   const authHeader = `Basic ${Buffer.from(`kasm_user:${entry.vncPassword}`).toString('base64')}`;
 
-  const targetSocket = netConnect(entry.vncPort, 'localhost');
+  const targetSocket = tlsConnect({
+    port: entry.vncPort,
+    host: 'localhost',
+    rejectUnauthorized: false,
+  });
   let targetReady = false;
 
   targetSocket.on('connect', () => {
