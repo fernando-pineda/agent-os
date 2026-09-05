@@ -1,6 +1,14 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectItemIndicator,
+  SelectIcon,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { ReasoningLevel } from '@/lib/types';
 
 const LEVELS: { value: ReasoningLevel; label: string }[] = [
@@ -29,26 +37,25 @@ export function ReasoningLevelSelect({
       <label className="mb-1.5 block text-xs font-medium text-zinc-400">
         Reasoning
       </label>
-      <select
-        value={value}
+      <Select
+        value={value || null}
+        onValueChange={(v) => onChange((v as ReasoningLevel | null) ?? null)}
         disabled={disabled}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange(v ? (v as ReasoningLevel) : null);
-        }}
-        className={cn(
-          'h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100',
-          'focus:outline-none focus:ring-1 focus:ring-zinc-600',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-        )}
+        items={LEVELS}
       >
-        <option value="">Default</option>
-        {LEVELS.map((l) => (
-          <option key={l.value} value={l.value}>
-            {l.label}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger>
+          <SelectValue placeholder="Default" />
+          <SelectIcon />
+        </SelectTrigger>
+        <SelectContent>
+          {LEVELS.map((level) => (
+            <SelectItem key={level.value} value={level.value}>
+              {level.label}
+              <SelectItemIndicator />
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
