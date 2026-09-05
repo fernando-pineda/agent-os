@@ -19,6 +19,7 @@
     "@assistant-ui/store": "0.3.11",
     "@assistant-ui/tap": "0.9.15",
     "@base-ui/react": "^1.7.0",
+    "@novnc/novnc": "1.7.0",
     "ai": "^7.0.83",
     "assistant-stream": "0.3.40",
     "class-variance-authority": "^0.7.1",

@@ -1,11 +1,11 @@
 'use client';
 
 import {
+  ChevronRightIcon,
   Loader2Icon,
   Maximize2Icon,
   SquareIcon,
   XIcon,
-  ChevronRightIcon,
 } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -17,12 +17,16 @@ import {
   useState,
 } from 'react';
 import {
+  HostDesktopPreview,
+  HostDesktopView,
+} from '@/components/host-desktop-view';
+import { Button } from '@/components/ui/button';
+import {
   Drawer,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { Button } from '@/components/ui/button';
 import { getSubagentStreamUrl, stopSubagent } from '@/lib/api';
 import type {
   ActiveSubagentRun,
@@ -472,22 +476,17 @@ function EventRow({ event }: { event: SubagentStreamEvent }): ReactNode {
  * Read-only detail view shown inside a Dialog when a card is clicked.
  * Uses the same dark theme and layout patterns as the main Thread.
  */
-function ReadOnlyRunView({
-  run,
-  onClose,
-}: {
-  run: ActiveSubagentRun;
-  onClose: () => void;
-}): ReactNode {
+function ReadOnlyRunView({ run }: { run: ActiveSubagentRun }): ReactNode {
   const entries = buildChatEntries(run.task, run.events);
   const completed = run.status !== 'running';
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastEntry = entries[entries.length - 1];
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (lastEntry && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [entries.length]);
+  }, [lastEntry]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -551,6 +550,7 @@ export function SubagentPanel({
     (desktopPort !== undefined
       ? `https://localhost:${desktopPort}`
       : undefined);
+  const isHostDesktop = resolvedDesktopUrl?.includes('/desktop/host/') ?? false;
 
   useEffect(() => {
     setRuns([]);
@@ -676,13 +676,17 @@ export function SubagentPanel({
               onClick={() => setDesktopExpanded(true)}
               className="group relative block w-full"
             >
-              <iframe
-                src={resolvedDesktopUrl}
-                title="Desktop preview"
-                className="pointer-events-none h-32 w-full border-0"
-                scrolling="no"
-                tabIndex={-1}
-              />
+              {isHostDesktop ? (
+                <HostDesktopPreview baseUrl={resolvedDesktopUrl} />
+              ) : (
+                <iframe
+                  src={resolvedDesktopUrl}
+                  title="Desktop preview"
+                  className="pointer-events-none h-32 w-full border-0"
+                  scrolling="no"
+                  tabIndex={-1}
+                />
+              )}
               <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
                 <Maximize2Icon className="size-5 text-zinc-200" />
               </div>
@@ -718,7 +722,23 @@ export function SubagentPanel({
         </div>
       </aside>
 
-      {desktopExpanded && resolvedDesktopUrl && (
+      {desktopExpanded && resolvedDesktopUrl && isHostDesktop ? (
+        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
+          <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-3 py-2">
+            <span className="text-xs font-medium text-zinc-300">
+              Shared macOS desktop
+            </span>
+            <button
+              type="button"
+              onClick={() => setDesktopExpanded(false)}
+              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
+          <HostDesktopView baseUrl={resolvedDesktopUrl} />
+        </div>
+      ) : desktopExpanded && resolvedDesktopUrl ? (
         <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950">
           <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-3 py-2">
             <span className="text-xs font-medium text-zinc-300">Desktop</span>
@@ -748,7 +768,7 @@ export function SubagentPanel({
             allowFullScreen
           />
         </div>
-      )}
+      ) : null}
 
       {/* Read-only detail drawer */}
       <Drawer
@@ -793,10 +813,7 @@ export function SubagentPanel({
                   {(selectedRun.outputTokens / 1000).toFixed(1)}k out
                 </span>
               </div>
-              <ReadOnlyRunView
-                run={selectedRun}
-                onClose={() => setSelectedRunId(null)}
-              />
+              <ReadOnlyRunView run={selectedRun} />
             </>
           )}
         </DrawerContent>

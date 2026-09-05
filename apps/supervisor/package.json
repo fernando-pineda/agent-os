@@ -7,7 +7,8 @@
     "agent-os-supervisor": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && pnpm run build:native",
+    "build:native": "mkdir -p dist && xcrun swiftc -O -target arm64-apple-macosx13.0 -o dist/HostDesktopBroker native/HostDesktopBroker.swift -framework ScreenCaptureKit -framework CoreGraphics -framework CoreImage -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js",
     "lint": "biome check ."
@@ -15,10 +16,12 @@
   "dependencies": {
     "@agent-os/core": "workspace:*",
     "@agent-os/sandbox": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.84.4"
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "typescript": "~5.7.3",
-    "@types/node": "^22"
+    "@types/node": "^22",
+    "@types/ws": "8.18.1"
   }
 }

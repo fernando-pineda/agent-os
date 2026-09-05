@@ -93,6 +93,8 @@ export interface AgentInfo {
   reminders?: string[];
   desktopPort?: number;
   containerStatus?: ContainerStatus;
+  sandboxType?: 'host' | 'docker-desktop';
+  kasmImage?: string;
 }
 
 export interface ToolSpec {

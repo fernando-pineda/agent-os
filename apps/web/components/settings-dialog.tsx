@@ -2,7 +2,8 @@
 
 import { PencilIcon, Trash2Icon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useModelsFeed } from '@/components/agent-context';
+import { useAgentSelection, useModelsFeed } from '@/components/agent-context';
+import { HostDesktopReadiness } from '@/components/host-desktop-readiness';
 import { ModelPickerModal } from '@/components/model-picker-modal';
 import { RemindersEditor } from '@/components/reminders-editor';
 import { Button } from '@/components/ui/button';
@@ -48,6 +49,10 @@ interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const { models } = useModelsFeed();
+  const { agents, selectedAgentId } = useAgentSelection();
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
+  const showHostDesktopReadiness =
+    selectedAgent?.sandboxType !== 'docker-desktop';
 
   const [defaultModel, setDefaultModel] = useState('');
   const [reminders, setReminders] = useState<string[]>([]);
@@ -290,6 +295,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   Used for new agents and any agent without its own model.
                 </p>
               </div>
+              {showHostDesktopReadiness && <HostDesktopReadiness open={open} />}
             </div>
 
             {configError && (

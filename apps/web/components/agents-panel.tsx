@@ -800,6 +800,8 @@ export function AgentsPanel() {
     instructions,
     character,
     color,
+    sandboxType,
+    kasmImage,
     selectedPlugins,
     selectedSubagents,
     reminders,

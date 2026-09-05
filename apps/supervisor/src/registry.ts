@@ -1121,6 +1121,12 @@ export function toAgentInfo(
   if (config.reminders) {
     info.reminders = config.reminders;
   }
+  if (config.sandboxType !== undefined) {
+    info.sandboxType = config.sandboxType;
+  }
+  if (config.kasmImage !== undefined) {
+    info.kasmImage = config.kasmImage;
+  }
   if (entry?.vncPort !== undefined) {
     info.desktopPort = entry.vncPort;
   }

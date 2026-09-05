@@ -75,6 +75,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
 
   const addDesktopUrl = useCallback((agent: AgentInfo): AgentContextAgent => {
+    if (agent.sandboxType !== 'docker-desktop') {
+      const hostDesktopUrl = new URL(
+        `/api/agents/${encodeURIComponent(agent.id)}/desktop/host/`,
+        `${SUPERVISOR_BASE}/`,
+      );
+      return { ...agent, desktopUrl: hostDesktopUrl.toString() };
+    }
     if (agent.desktopPort === undefined) return agent;
     const desktopUrl = new URL(
       `${SUPERVISOR_BASE}/api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/`,

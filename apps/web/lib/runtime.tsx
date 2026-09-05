@@ -13,11 +13,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import {
-  useAgentsFeed,
-  useAgentUsage,
-  useLivePreview,
-} from '@/components/agent-context';
+import { useAgentUsage, useLivePreview } from '@/components/agent-context';
 import {
   getMessages,
   getUsage,
@@ -42,8 +38,6 @@ type ToolPart = {
 
 type MsgImage = { data: string; mimeType: string };
 
-// crypto.randomUUID is only available in secure contexts (HTTPS/localhost).
-// On plain-HTTP deployments (e.g. EC2 by IP) it is undefined, so fall back.
 function uid(): string {
   if (
     typeof crypto !== 'undefined' &&
@@ -60,13 +54,20 @@ type Msg = {
   text: string;
   images?: MsgImage[];
   toolParts?: ToolPart[];
-  // message_agent calls render as a standalone centered chip message.
   messageAgent?: { toAgentId: string; state: 'sending' | 'sent' | 'failed' };
-  // Inbound agent messages (received via /inbox) render as their own chip.
   inboxAgent?: { fromAgentId: string; reply: boolean };
-  // Auto-reply to an inbound agent message renders as a standalone chip.
   repliedToAgent?: { toAgentId: string };
 };
+
+function hasRenderableContent(m: Msg): boolean {
+  return Boolean(
+    m.text ||
+      m.images?.length ||
+      m.messageAgent ||
+      m.inboxAgent ||
+      m.repliedToAgent,
+  );
+}
 
 function toThreadMessageLike(m: Msg): ThreadMessageLike {
   if (m.messageAgent || m.inboxAgent || m.repliedToAgent) {
@@ -103,7 +104,6 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
       } as never);
     }
   }
-  // Tool calls are hidden from the thread; only agent-messaging chips render.
   if (content.length === 0) {
     content.push({ type: 'text', text: '' });
   }
@@ -112,8 +112,6 @@ function toThreadMessageLike(m: Msg): ThreadMessageLike {
     id: m.id,
     role: m.role === 'tool' ? 'assistant' : m.role,
     content,
-    // Tool calls run server-side with no approval gate; mark assistant
-    // messages complete so assistant-ui never shows Allow/Deny.
     ...(m.role === 'assistant' && {
       status: { type: 'complete', reason: 'stop' } as const,
     }),
@@ -139,7 +137,6 @@ function extractText(parts: unknown): string {
         ? String((p as { text?: unknown }).text ?? '')
         : '';
     if (text) {
-      // Separate text that follows a tool call with a blank line.
       out.push(prevWasTool ? `\n\n${text}` : text);
       prevWasTool = false;
     }
@@ -147,35 +144,6 @@ function extractText(parts: unknown): string {
   return out.join('');
 }
 
-function extractToolParts(parts: unknown): ToolPart[] {
-  if (!Array.isArray(parts)) return [];
-  const out: ToolPart[] = [];
-  for (const p of parts) {
-    if (
-      p &&
-      typeof p === 'object' &&
-      (p as { type?: string }).type === 'tool-call'
-    ) {
-      const o = p as Record<string, unknown>;
-      const toolName = String(o.toolName ?? '');
-      // message_agent renders as a chip message, not a tool part.
-      if (toolName === 'message_agent') continue;
-      out.push({
-        type: 'tool-call',
-        toolCallId: String(o.toolCallId ?? ''),
-        toolName,
-        args: (o.args as Record<string, unknown>) ?? {},
-        argsText: String(o.argsText ?? JSON.stringify(o.args ?? {})),
-        ...(o.result !== undefined && { result: String(o.result) }),
-        ...(o.isError !== undefined && { isError: Boolean(o.isError) }),
-      });
-    }
-  }
-  return out;
-}
-
-// Extract image parts from persisted UIMessage parts, converting data URLs
-// back to raw base64 + mimeType for storage in Msg.images.
 function extractImageParts(parts: unknown): MsgImage[] {
   if (!Array.isArray(parts)) return [];
   const out: MsgImage[] = [];
@@ -195,10 +163,57 @@ function extractImageParts(parts: unknown): MsgImage[] {
   return out;
 }
 
-// Walk interleaved parts in order and emit one Msg per text run and per
-// non-message_agent tool call, so reload matches the live render instead of
-// grouping all text above all tool chips. Image parts attach to the
-// preceding text Msg or form their own Msg.
+function messageAgentChipId(
+  messageId: string,
+  toolCallId: string,
+  partIndex: number,
+): string {
+  return toolCallId ? `chip-${toolCallId}` : `${messageId}-chip-${partIndex}`;
+}
+
+function extractMessageAgentChip(
+  part: unknown,
+  messageId: string,
+  partIndex: number,
+): { id: string; messageAgent: NonNullable<Msg['messageAgent']> } | undefined {
+  if (
+    !part ||
+    typeof part !== 'object' ||
+    (part as { type?: string }).type !== 'tool-call' ||
+    (part as { toolName?: string }).toolName !== 'message_agent'
+  ) {
+    return undefined;
+  }
+  const o = part as Record<string, unknown>;
+  const args = (o.args as Record<string, unknown>) ?? {};
+  const toAgentId = typeof args.toAgentId === 'string' ? args.toAgentId : '';
+  const toolCallId = typeof o.toolCallId === 'string' ? o.toolCallId : '';
+  const result = typeof o.result === 'string' ? o.result : '';
+  const lower = result.toLowerCase();
+  const failed =
+    Boolean(o.isError) ||
+    lower.startsWith('agent') ||
+    lower.startsWith('busy') ||
+    lower.startsWith('unreachable');
+  return {
+    id: messageAgentChipId(messageId, toolCallId, partIndex),
+    messageAgent: {
+      toAgentId,
+      state: failed ? 'failed' : 'sent',
+    },
+  };
+}
+
+function getPartId(part: unknown): string | undefined {
+  if (!part || typeof part !== 'object') return undefined;
+  const o = part as Record<string, unknown>;
+  if (typeof o.id === 'string' && o.id) return o.id;
+  if (typeof o.toolCallId === 'string' && o.toolCallId) {
+    return o.toolCallId;
+  }
+  return undefined;
+}
+
 function buildOrderedMsgs(
   id: string,
   role: Msg['role'],
@@ -208,13 +223,37 @@ function buildOrderedMsgs(
   if (!Array.isArray(parts)) return out;
   let text = '';
   let prevWasTool = false;
+  let textPart: unknown;
+  let textPartIndex = 0;
+  const usedIds = new Set<string>();
+  const partMessageId = (
+    kind: string,
+    part: unknown,
+    index: number,
+  ): string => {
+    const partId = getPartId(part) ?? String(index);
+    const base = `${id}-${kind}-${partId}`;
+    let candidate = base;
+    let suffix = 1;
+    while (usedIds.has(candidate)) {
+      candidate = `${base}-${suffix}`;
+      suffix++;
+    }
+    usedIds.add(candidate);
+    return candidate;
+  };
   const flushText = (): void => {
     if (text) {
-      out.push({ id: `${id}-t${out.length}`, role, text });
+      out.push({
+        id: partMessageId('text', textPart, textPartIndex),
+        role,
+        text,
+      });
       text = '';
+      textPart = undefined;
     }
   };
-  for (const p of parts) {
+  for (const [partIndex, p] of parts.entries()) {
     const isTool =
       p &&
       typeof p === 'object' &&
@@ -222,13 +261,23 @@ function buildOrderedMsgs(
     const isImage =
       p && typeof p === 'object' && (p as { type?: string }).type === 'image';
     if (isTool) {
-      const tp = extractToolParts([p]);
-      // Hidden from the thread; only message_agent renders, as a chip.
       flushText();
-      prevWasTool = true;
+      const chip = extractMessageAgentChip(p, id, partIndex);
+      if (chip) {
+        out.push({
+          id: chip.id,
+          role: 'assistant',
+          text: '',
+          messageAgent: chip.messageAgent,
+        });
+        prevWasTool = false;
+      } else {
+        prevWasTool = true;
+      }
       continue;
     }
     if (isImage) {
+      flushText();
       const img = extractImageParts([p]);
       if (img.length > 0) {
         const last = out[out.length - 1];
@@ -241,7 +290,7 @@ function buildOrderedMsgs(
           last.images = [...(last.images ?? []), ...img];
         } else {
           out.push({
-            id: `${id}-img${out.length}`,
+            id: partMessageId('image', p, partIndex),
             role,
             text: '',
             images: img,
@@ -256,6 +305,10 @@ function buildOrderedMsgs(
         ? String((p as { text?: unknown }).text ?? '')
         : '';
     if (t) {
+      if (!text) {
+        textPart = p;
+        textPartIndex = partIndex;
+      }
       text += prevWasTool ? `\n\n${t}` : t;
       prevWasTool = false;
     }
@@ -264,46 +317,8 @@ function buildOrderedMsgs(
   return out;
 }
 
-// Rebuild chip messages from persisted message_agent tool-call parts.
-function extractMessageAgentChips(
-  parts: unknown,
-): (NonNullable<Msg['messageAgent']> & { toolCallId: string })[] {
-  if (!Array.isArray(parts)) return [];
-  const chips: (NonNullable<Msg['messageAgent']> & { toolCallId: string })[] =
-    [];
-  for (const p of parts) {
-    if (
-      p &&
-      typeof p === 'object' &&
-      (p as { type?: string }).type === 'tool-call' &&
-      (p as { toolName?: string }).toolName === 'message_agent'
-    ) {
-      const o = p as Record<string, unknown>;
-      const args = (o.args as Record<string, unknown>) ?? {};
-      const toAgentId =
-        typeof args.toAgentId === 'string' ? args.toAgentId : '';
-      const result = typeof o.result === 'string' ? o.result : '';
-      const lower = result.toLowerCase();
-      const failed =
-        Boolean(o.isError) ||
-        lower.startsWith('agent') ||
-        lower.startsWith('busy') ||
-        lower.startsWith('unreachable');
-      chips.push({
-        toolCallId: String(o.toolCallId ?? uid()),
-        toAgentId,
-        state: failed ? 'failed' : 'sent',
-      });
-    }
-  }
-  return chips;
-}
-
 const INBOX_RE = /^\[agent-os:inbox from=([^\s\]]+)( reply)?\]/;
 
-// Inbound agent messages get a chip before the (hidden) original text message.
-// Detected via metadata.agentOsInbox (persisted) or the [agent-os:inbox] text
-// prefix (older threads).
 function extractInboxChip(m: {
   role: string;
   parts?: unknown;
@@ -324,8 +339,6 @@ function extractInboxChip(m: {
   return { fromAgentId: match[1], reply: Boolean(match[2]) };
 }
 
-// Assistant messages that auto-replied to an inbound agent message carry
-// metadata.replyToAgentId; surface it as a standalone chip before the text.
 function extractRepliedToChip(m: {
   role: string;
   metadata?: unknown;
@@ -337,9 +350,6 @@ function extractRepliedToChip(m: {
   return { toAgentId: id };
 }
 
-// Parse persisted UIMessages into render Msgs. Shared by initial load and
-// the live message stream. Ids are made unique per message index because
-// several persisted messages can share an id after turn re-persists.
 function parseThreadMessages(ui: unknown[]): Msg[] {
   const seenIds = new Set<string>();
   return (ui as Record<string, unknown>[]).flatMap((m, i) => {
@@ -364,15 +374,6 @@ function parseThreadMessages(ui: unknown[]): Msg[] {
       });
       return out;
     }
-    const chips = extractMessageAgentChips(parts);
-    chips.forEach((chip) => {
-      out.push({
-        id: `chip-${chip.toolCallId}`,
-        role: 'assistant',
-        text: '',
-        messageAgent: { toAgentId: chip.toAgentId, state: chip.state },
-      });
-    });
     const repliedToChip = extractRepliedToChip(m as never);
     if (repliedToChip) {
       out.push({
@@ -385,17 +386,23 @@ function parseThreadMessages(ui: unknown[]): Msg[] {
     const ordered = buildOrderedMsgs(id, role, parts);
     if (ordered.length > 0) {
       out.push(...ordered);
-    } else if (chips.length === 0) {
+    } else {
       const text =
         extractText(parts) || (m as { content?: string }).content || '';
       const images = extractImageParts(parts);
-      out.push({
-        id,
-        role,
-        text,
-        ...(images.length > 0 && { images }),
-        toolParts: [],
-      });
+      if (
+        text ||
+        images.length > 0 ||
+        (role !== 'assistant' && role !== 'tool')
+      ) {
+        out.push({
+          id,
+          role,
+          text,
+          ...(images.length > 0 && { images }),
+          toolParts: [],
+        });
+      }
     }
     return out;
   });
@@ -405,25 +412,40 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const isRunningRef = useRef(false);
+  const localRunRef = useRef(0);
+  const snapshotVersionRef = useRef(0);
+  const activeAgentRef = useRef(agentId);
   const [loaded, setLoaded] = useState(false);
   const { setLivePreview, clearLivePreview } = useLivePreview();
   const { setUsage } = useAgentUsage();
 
   useEffect(() => {
     let cancelled = false;
+    if (activeAgentRef.current !== agentId) {
+      localRunRef.current++;
+      isRunningRef.current = false;
+      setIsRunning(false);
+      abortRef.current?.abort();
+      abortRef.current = null;
+      activeAgentRef.current = agentId;
+    }
     setLoaded(false);
     getUsage(agentId)
       .then((u) => {
         if (!cancelled) setUsage(agentId, u);
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error('usage load failed', err);
+      });
     getMessages(agentId)
       .then((ui) => {
         if (cancelled) return;
         setMessages(parseThreadMessages(ui as unknown[]));
         setLoaded(true);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('message load failed', err);
         if (!cancelled) {
           setMessages([]);
           setLoaded(true);
@@ -434,17 +456,13 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
     };
   }, [agentId, setUsage]);
 
-  // Live message stream: the agent pushes its persisted thread on every
-  // turn (including inbound agent messages), so the UI re-renders without a
-  // manual refresh. Skip while a local run is streaming to avoid clobbering
-  // the in-progress optimistic state.
-  const isRunningRef = useRef(false);
   isRunningRef.current = isRunning;
   useEffect(() => {
     if (!loaded) return;
     const unsubscribe = subscribeAgentMessages(
       agentId,
       (raw) => {
+        snapshotVersionRef.current++;
         if (isRunningRef.current) return;
         setMessages(parseThreadMessages(raw));
       },
@@ -466,7 +484,8 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
         .join('');
       if (!text) return;
 
-      // Extract completed image attachments as base64 + mimeType.
+      const localRunId = ++localRunRef.current;
+
       const images: MsgImage[] = [];
       for (const att of message.attachments ?? []) {
         if (att.type !== 'image') continue;
@@ -488,53 +507,57 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
       };
       const nextMessages = [...messages, userMsg];
       setMessages(nextMessages);
+      isRunningRef.current = true;
       setIsRunning(true);
 
-      // Each text run and each tool call is its own message, in order.
       let current: Msg = {
         id: uid(),
         role: 'assistant',
         text: '',
         toolParts: [],
       };
-      setMessages((prev) => [...prev, current]);
 
       const pushCurrent = (): void => {
         const id = current.id;
         const snapshot = { ...current };
-        setMessages((prev) => prev.map((m) => (m.id === id ? snapshot : m)));
+        if (!hasRenderableContent(snapshot)) return;
+        setMessages((prev) => {
+          const index = prev.findIndex((m) => m.id === id);
+          if (index < 0) return [...prev, snapshot];
+          return prev.map((m) => (m.id === id ? snapshot : m));
+        });
       };
 
-      const startNew = (toolParts?: ToolPart[]): Msg => {
+      const startNew = (): Msg => {
         current = {
           id: uid(),
           role: 'assistant',
           text: '',
-          ...(toolParts ? { toolParts } : {}),
         };
-        const c = current;
-        setMessages((prev) => [...prev, c]);
-        return c;
+        return current;
       };
 
       const toolMap = new Map<string, ToolPart>();
-      const chipMap = new Map<string, string>(); // toolCallId -> accumulated argsText
+      const chipMap = new Map<string, { id: string; argsText: string }>();
+      let chipIndex = 0;
       const updateChip = (
         toolCallId: string,
         update: Partial<NonNullable<Msg['messageAgent']>>,
       ): void => {
+        const chip = chipMap.get(toolCallId);
+        if (!chip) return;
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === toolCallId && m.messageAgent
+            m.id === chip.id && m.messageAgent
               ? { ...m, messageAgent: { ...m.messageAgent, ...update } }
               : m,
           ),
         );
       };
 
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
-        const controller = new AbortController();
-        abortRef.current = controller;
         const res = await fetch(
           `${SUPERVISOR_BASE}/api/agents/${agentId}/chat`,
           {
@@ -576,7 +599,6 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
           buffer = lines.pop() ?? '';
           for (const line of lines) {
             if (line.startsWith('0:')) {
-              // Text after a tool call joins that same message, not a new one.
               current.text += JSON.parse(line.slice(2)) as string;
               pushCurrent();
               setLivePreview(agentId, current.text.slice(-120));
@@ -586,17 +608,21 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 toolName: string;
               };
               if (d.toolName === 'message_agent') {
-                // Flush pending text, then emit a standalone chip message.
-                if (current.text || (current.toolParts?.length ?? 0) > 0) {
-                  startNew();
-                }
+                pushCurrent();
+                const previousCurrent = current;
+                startNew();
                 const chip: Msg = {
-                  id: `chip-${d.toolCallId}`,
+                  id: messageAgentChipId(
+                    previousCurrent.id,
+                    d.toolCallId,
+                    chipIndex,
+                  ),
                   role: 'assistant',
                   text: '',
                   messageAgent: { toAgentId: '', state: 'sending' },
                 };
-                chipMap.set(d.toolCallId, '');
+                chipIndex++;
+                chipMap.set(d.toolCallId, { id: chip.id, argsText: '' });
                 setMessages((prev) => [...prev, chip]);
               } else {
                 const tp: ToolPart = {
@@ -607,7 +633,6 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                   argsText: '',
                 };
                 toolMap.set(d.toolCallId, tp);
-                // Hidden from the thread; track state only, no message added.
               }
               setLivePreview(agentId, `Running ${d.toolName}...`);
             } else if (line.startsWith('c:')) {
@@ -616,18 +641,17 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 argsTextDelta: string;
                 isFinal?: boolean;
               };
-              const chipArgs = chipMap.get(d.toolCallId);
-              if (chipArgs !== undefined) {
-                // Accumulate argsText and surface toAgentId as soon as it parses.
-                const acc = chipArgs + d.argsTextDelta;
-                chipMap.set(d.toolCallId, acc);
+              const chip = chipMap.get(d.toolCallId);
+              if (chip) {
+                const acc = chip.argsText + d.argsTextDelta;
+                chip.argsText = acc;
                 try {
                   const parsed = JSON.parse(acc) as { toAgentId?: unknown };
                   if (typeof parsed.toAgentId === 'string') {
                     updateChip(d.toolCallId, { toAgentId: parsed.toAgentId });
                   }
-                } catch {
-                  // partial JSON while streaming
+                } catch (err) {
+                  if (!(err instanceof SyntaxError)) throw err;
                 }
               } else {
                 const tp = toolMap.get(d.toolCallId);
@@ -638,8 +662,8 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                       string,
                       unknown
                     >;
-                  } catch {
-                    // partial JSON while streaming
+                  } catch (err) {
+                    if (!(err instanceof SyntaxError)) throw err;
                   }
                   pushCurrent();
                 }
@@ -688,7 +712,6 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
                 });
               }
             } else if (line.startsWith('k:')) {
-              // File part from the agent (e.g. screenshot tool output).
               const d = JSON.parse(line.slice(2)) as {
                 data: string;
                 mimeType: string;
@@ -722,8 +745,26 @@ export function RuntimeProvider({ children, agentId }: RuntimeProviderProps) {
           clearLivePreview(agentId);
         }
       } finally {
-        abortRef.current = null;
-        setIsRunning(false);
+        if (abortRef.current === controller) abortRef.current = null;
+        if (localRunRef.current === localRunId) {
+          isRunningRef.current = false;
+          setIsRunning(false);
+          const snapshotVersion = snapshotVersionRef.current;
+          void getMessages(agentId)
+            .then((ui) => {
+              if (
+                localRunRef.current !== localRunId ||
+                snapshotVersionRef.current !== snapshotVersion ||
+                !ui.some((m) => m.id === userMsg.id)
+              ) {
+                return;
+              }
+              setMessages(parseThreadMessages(ui as unknown[]));
+            })
+            .catch((err) => {
+              console.error('message reconciliation failed', err);
+            });
+        }
         clearLivePreview(agentId);
       }
     },

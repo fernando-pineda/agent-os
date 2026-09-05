@@ -50,6 +50,8 @@ if (!rawAgentId || typeof rawAgentId !== 'string') {
 const agentId = rawAgentId;
 const containerName = process.env.AGENT_CONTAINER_NAME;
 const DOCKER_EXEC_TIMEOUT_MS = 120_000;
+const DOCKER_BINARY_MAX_BUFFER = 32 * 1024 * 1024;
+const DOCKER_SCREENSHOT_XAUTHORITY = '/home/kasm-user/.Xauthority';
 
 let _currentStatus: AgentStatus = 'starting';
 let mcpConnections: McpConnection[] = [];
@@ -437,11 +439,15 @@ Deleting an agent is irreversible. Call agent_delete only when the user explicit
   const memory = inputs.memoryIndex?.trim()
     ? `\n\n## long-term memory\n\nCompressed facts from your previous sessions follow. Use them silently; never mention this index unless the user asks about your memory.\n\n${inputs.memoryIndex.trim()}`
     : '';
-  const execution = `## execution mode
+  const execution = inputs.containerName
+    ? `## execution mode
 
-Prefer the shell for almost everything. File edits, git, scripts, package managers, builds, tests, API calls, reading and transforming data all go through shell and file tools first. They are faster, scriptable, and reliable.
+Prefer the shell for code, git, scripts, package managers, builds, tests, API calls, reading and transforming data. For Docker GUI work, use the structured computer tool instead of bash. Take a screenshot observation with computer before any mutating GUI action, and request screenshot or observe on mutating actions when you need to inspect the result. Do not diagnose X11 or install packages through bash for GUI work unless computer reports an adapter error. Never pass shell commands as computer actions.
 
-Use the computer-use tools (open-computer-use) only when a task truly requires the GUI and cannot be done from the shell: interacting with a desktop app that has no CLI or API, clicking through a native dialog, reading something that only renders on screen. Never reach for computer use to do what a shell command or file edit would do.`;
+For Docker GUI work, suppress internal progress narration, shell or X11 debugging narration, and repeated tool-search commentary in user-facing text. Act with the structured computer tool, expose only a short outcome or error, and leave structured tool results and image attachments to the UI.`
+    : `## execution mode
+
+Prefer the shell for almost everything. File edits, git, scripts, package managers, builds, tests, API calls, reading and transforming data all go through shell and file tools first. They are faster, scriptable, and reliable.`;
   return `${identity}\n\n${environment}\n\n${behavior}\n\n${writing}\n\n${safety}\n\n${execution}${reminders}${memory}`;
 }
 
@@ -678,6 +684,7 @@ function buildTools(
     ),
     createContainerBashTool(containerName),
     createContainerScreenshotTool(containerName),
+    createContainerComputerTool(containerName),
   ];
 }
 
@@ -717,7 +724,11 @@ function runContainerBinaryCommand(
     execFile(
       'docker',
       args,
-      { timeout: DOCKER_EXEC_TIMEOUT_MS, encoding: 'buffer' },
+      {
+        timeout: DOCKER_EXEC_TIMEOUT_MS,
+        encoding: 'buffer',
+        maxBuffer: DOCKER_BINARY_MAX_BUFFER,
+      },
       (error, stdout, stderr) => {
         resolve({
           error,
@@ -737,6 +748,324 @@ function combineCommandOutput(stdout: string, stderr: string): string {
     return stdout;
   }
   return `${stdout}\n${stderr}`;
+}
+
+interface DisplayGeometry {
+  width: number;
+  height: number;
+}
+
+function resolveContainerDisplay(
+  args: Record<string, unknown>,
+): number | undefined {
+  if (args.display === undefined) {
+    return 1;
+  }
+  if (
+    typeof args.display !== 'number' ||
+    !Number.isSafeInteger(args.display) ||
+    args.display < 0
+  ) {
+    return undefined;
+  }
+  return args.display;
+}
+
+function parseDisplayGeometry(output: string): DisplayGeometry | undefined {
+  const match = output.trim().match(/^(\d+)\s+(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+  const widthText = match[1];
+  const heightText = match[2];
+  if (!widthText || !heightText) {
+    return undefined;
+  }
+  const width = Number(widthText);
+  const height = Number(heightText);
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return undefined;
+  }
+  return { width, height };
+}
+
+function containerX11ExecArgs(
+  containerName: string,
+  display: number,
+): string[] {
+  return [
+    'exec',
+    '-e',
+    `DISPLAY=:${display}`,
+    '-e',
+    `XAUTHORITY=${DOCKER_SCREENSHOT_XAUTHORITY}`,
+    containerName,
+  ];
+}
+
+function formatContainerError(stderr: string, fallback: string): string {
+  const detail = stderr.trim().replace(/\s+/g, ' ');
+  if (detail.length === 0) {
+    return fallback;
+  }
+  return detail.length > 500 ? `${detail.slice(0, 500)}...` : detail;
+}
+
+function sameDisplayGeometry(
+  first: DisplayGeometry,
+  second: DisplayGeometry,
+): boolean {
+  return first.width === second.width && first.height === second.height;
+}
+
+const COMPUTER_MAX_COORDINATE = 16_384;
+const COMPUTER_MAX_TEXT_LENGTH = 4_096;
+const COMPUTER_MAX_KEY_LENGTH = 128;
+const COMPUTER_MAX_SCROLL_AMOUNT = 10;
+
+type ComputerAction =
+  | 'screenshot'
+  | 'click'
+  | 'move'
+  | 'type'
+  | 'key'
+  | 'scroll';
+
+interface ComputerCoordinates {
+  x: number;
+  y: number;
+}
+
+interface ComputerCoordinatesSuccess {
+  ok: true;
+  coordinates: ComputerCoordinates;
+}
+
+interface ComputerCoordinatesFailure {
+  ok: false;
+  output: string;
+}
+
+type ComputerCoordinatesResult =
+  | ComputerCoordinatesSuccess
+  | ComputerCoordinatesFailure;
+
+interface ComputerFlagsSuccess {
+  ok: true;
+  screenshot: boolean;
+  observe: boolean;
+}
+
+interface ComputerFlagsFailure {
+  ok: false;
+  output: string;
+}
+
+type ComputerFlagsResult = ComputerFlagsSuccess | ComputerFlagsFailure;
+
+interface DisplayGeometrySuccess {
+  ok: true;
+  geometry: DisplayGeometry;
+}
+
+interface DisplayGeometryFailure {
+  ok: false;
+  output: string;
+}
+
+type DisplayGeometryResult = DisplayGeometrySuccess | DisplayGeometryFailure;
+
+function isComputerAction(action: string): action is ComputerAction {
+  return (
+    action === 'screenshot' ||
+    action === 'click' ||
+    action === 'move' ||
+    action === 'type' ||
+    action === 'key' ||
+    action === 'scroll'
+  );
+}
+
+function readComputerCoordinates(
+  args: Record<string, unknown>,
+): ComputerCoordinatesResult {
+  const x = args.x;
+  const y = args.y;
+  if (
+    typeof x !== 'number' ||
+    !Number.isFinite(x) ||
+    !Number.isSafeInteger(x) ||
+    x < 0 ||
+    x >= COMPUTER_MAX_COORDINATE
+  ) {
+    return {
+      ok: false,
+      output: `x must be a finite non-negative integer below ${COMPUTER_MAX_COORDINATE}`,
+    };
+  }
+  if (
+    typeof y !== 'number' ||
+    !Number.isFinite(y) ||
+    !Number.isSafeInteger(y) ||
+    y < 0 ||
+    y >= COMPUTER_MAX_COORDINATE
+  ) {
+    return {
+      ok: false,
+      output: `y must be a finite non-negative integer below ${COMPUTER_MAX_COORDINATE}`,
+    };
+  }
+  return { ok: true, coordinates: { x, y } };
+}
+
+function readComputerFlags(args: Record<string, unknown>): ComputerFlagsResult {
+  const screenshot = args.screenshot;
+  if (screenshot !== undefined && typeof screenshot !== 'boolean') {
+    return { ok: false, output: 'screenshot must be a boolean' };
+  }
+  const observe = args.observe;
+  if (observe !== undefined && typeof observe !== 'boolean') {
+    return { ok: false, output: 'observe must be a boolean' };
+  }
+  return {
+    ok: true,
+    screenshot: screenshot === true,
+    observe: observe === true,
+  };
+}
+
+function isValidComputerKey(key: string): boolean {
+  if (key.length === 0 || key.length > COMPUTER_MAX_KEY_LENGTH) {
+    return false;
+  }
+  return key.split('+').every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
+function isComputerCoordinateWithinDisplay(
+  coordinates: ComputerCoordinates,
+  geometry: DisplayGeometry,
+): boolean {
+  return coordinates.x < geometry.width && coordinates.y < geometry.height;
+}
+
+async function probeContainerDisplayGeometry(
+  containerName: string,
+  display: number,
+  fallback: string,
+): Promise<DisplayGeometryResult> {
+  const geometryProbe = await runContainerCommand([
+    ...containerX11ExecArgs(containerName, display),
+    '/usr/bin/xdotool',
+    'getdisplaygeometry',
+  ]);
+  if (geometryProbe.error !== null) {
+    return {
+      ok: false,
+      output: formatContainerError(geometryProbe.stderr, fallback),
+    };
+  }
+  const geometry = parseDisplayGeometry(geometryProbe.stdout);
+  if (geometry === undefined) {
+    return { ok: false, output: fallback };
+  }
+  return { ok: true, geometry };
+}
+
+async function captureContainerScreenshot(
+  containerName: string,
+  display: number,
+  outputPath: string,
+): Promise<ToolResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const geometryProbe = await probeContainerDisplayGeometry(
+      containerName,
+      display,
+      'Unable to determine Docker display geometry',
+    );
+    if (!geometryProbe.ok) {
+      return geometryProbe;
+    }
+
+    const geometry = geometryProbe.geometry;
+    const x11Args = containerX11ExecArgs(containerName, display);
+    const capture = await runContainerBinaryCommand([
+      ...x11Args,
+      '/usr/bin/ffmpeg',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'x11grab',
+      '-video_size',
+      `${geometry.width}x${geometry.height}`,
+      '-framerate',
+      '1',
+      '-i',
+      `:${display}.0`,
+      '-frames:v',
+      '1',
+      '-f',
+      'image2pipe',
+      '-vcodec',
+      'png',
+      'pipe:1',
+    ]);
+
+    const currentGeometryProbe = await probeContainerDisplayGeometry(
+      containerName,
+      display,
+      'Unable to verify Docker display geometry',
+    );
+    if (!currentGeometryProbe.ok) {
+      return currentGeometryProbe;
+    }
+    if (!sameDisplayGeometry(geometry, currentGeometryProbe.geometry)) {
+      if (attempt === 0) {
+        continue;
+      }
+      return {
+        ok: false,
+        output: 'Docker display geometry changed during capture',
+      };
+    }
+
+    if (capture.error !== null) {
+      return {
+        ok: false,
+        output: formatContainerError(
+          capture.stderr,
+          'Docker screenshot capture failed',
+        ),
+      };
+    }
+    if (capture.stdout.length === 0) {
+      return {
+        ok: false,
+        output: 'Docker screenshot capture returned no image',
+      };
+    }
+
+    return {
+      ok: true,
+      output: outputPath,
+      images: [
+        {
+          data: capture.stdout.toString('base64'),
+          mimeType: 'image/png',
+        },
+      ],
+    };
+  }
+
+  return {
+    ok: false,
+    output: 'Docker screenshot capture failed',
+  };
 }
 
 function createContainerBashTool(containerName: string): Tool {
@@ -795,45 +1124,275 @@ function createContainerScreenshotTool(containerName: string): Tool {
         typeof args.outputPath === 'string'
           ? join(ctx.homeDir, args.outputPath)
           : join(ctx.homeDir, 'desktop_screenshot.png');
-      const capture = await runContainerCommand([
-        'exec',
+      const display = resolveContainerDisplay(args);
+      if (display === undefined) {
+        return {
+          ok: false,
+          output: 'display must be a non-negative integer',
+        };
+      }
+      return captureContainerScreenshot(containerName, display, outputPath);
+    },
+  };
+}
+
+function createContainerComputerTool(containerName: string): Tool {
+  return {
+    spec: {
+      name: 'computer',
+      description:
+        'Perform constrained GUI actions in the Docker desktop. Use screenshot before acting and set screenshot or observe on mutating actions when an updated image is needed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['screenshot', 'click', 'move', 'type', 'key', 'scroll'],
+          },
+          x: { type: 'number', minimum: 0 },
+          y: { type: 'number', minimum: 0 },
+          button: { type: 'integer', minimum: 1, maximum: 5 },
+          text: {
+            type: 'string',
+            minLength: 1,
+            maxLength: COMPUTER_MAX_TEXT_LENGTH,
+          },
+          key: {
+            type: 'string',
+            minLength: 1,
+            maxLength: COMPUTER_MAX_KEY_LENGTH,
+          },
+          direction: { type: 'string', enum: ['up', 'down'] },
+          amount: {
+            type: 'integer',
+            minimum: 1,
+            maximum: COMPUTER_MAX_SCROLL_AMOUNT,
+          },
+          screenshot: { type: 'boolean' },
+          observe: { type: 'boolean' },
+          display: { type: 'number', minimum: 0 },
+        },
+        required: ['action'],
+      },
+    },
+    async execute(
+      args: Record<string, unknown>,
+      ctx: ToolContext,
+    ): Promise<ToolResult> {
+      if ('command' in args) {
+        return {
+          ok: false,
+          output: 'computer does not accept shell commands',
+        };
+      }
+
+      const action = args.action;
+      if (typeof action !== 'string' || !isComputerAction(action)) {
+        return {
+          ok: false,
+          output:
+            'action must be one of screenshot, click, move, type, key, or scroll',
+        };
+      }
+
+      const flags = readComputerFlags(args);
+      if (!flags.ok) {
+        return flags;
+      }
+
+      const display = resolveContainerDisplay(args);
+      if (display === undefined) {
+        return {
+          ok: false,
+          output: 'display must be a non-negative integer',
+        };
+      }
+
+      const outputPath = join(ctx.homeDir, 'desktop_screenshot.png');
+      if (action === 'screenshot') {
+        return captureContainerScreenshot(containerName, display, outputPath);
+      }
+
+      let command: string[];
+      let resultOutput: string;
+      if (action === 'click' || action === 'move' || action === 'scroll') {
+        const coordinateResult = readComputerCoordinates(args);
+        if (!coordinateResult.ok) {
+          return coordinateResult;
+        }
+
+        const geometryResult = await probeContainerDisplayGeometry(
+          containerName,
+          display,
+          'Unable to determine Docker display geometry',
+        );
+        if (!geometryResult.ok) {
+          return geometryResult;
+        }
+        if (
+          !isComputerCoordinateWithinDisplay(
+            coordinateResult.coordinates,
+            geometryResult.geometry,
+          )
+        ) {
+          return {
+            ok: false,
+            output: `coordinates must be within the ${geometryResult.geometry.width}x${geometryResult.geometry.height} Docker display`,
+          };
+        }
+
+        const { x, y } = coordinateResult.coordinates;
+        const x11Args = containerX11ExecArgs(containerName, display);
+        if (action === 'click') {
+          const button = args.button;
+          if (
+            button !== undefined &&
+            (typeof button !== 'number' ||
+              !Number.isSafeInteger(button) ||
+              button < 1 ||
+              button > 5)
+          ) {
+            return {
+              ok: false,
+              output: 'button must be an integer from 1 through 5',
+            };
+          }
+          const clickButton = button === undefined ? 1 : button;
+          command = [
+            ...x11Args,
+            '/usr/bin/xdotool',
+            'mousemove',
+            '--sync',
+            String(x),
+            String(y),
+            'click',
+            String(clickButton),
+          ];
+          resultOutput = `Clicked at (${x}, ${y})`;
+        } else if (action === 'move') {
+          command = [
+            ...x11Args,
+            '/usr/bin/xdotool',
+            'mousemove',
+            '--sync',
+            String(x),
+            String(y),
+          ];
+          resultOutput = `Moved to (${x}, ${y})`;
+        } else {
+          const direction = args.direction;
+          if (direction !== 'up' && direction !== 'down') {
+            return {
+              ok: false,
+              output: 'direction must be up or down',
+            };
+          }
+          const amount = args.amount;
+          if (
+            amount !== undefined &&
+            (typeof amount !== 'number' ||
+              !Number.isSafeInteger(amount) ||
+              amount < 1 ||
+              amount > COMPUTER_MAX_SCROLL_AMOUNT)
+          ) {
+            return {
+              ok: false,
+              output: `amount must be an integer from 1 through ${COMPUTER_MAX_SCROLL_AMOUNT}`,
+            };
+          }
+          const scrollAmount = amount === undefined ? 1 : amount;
+          const button = direction === 'up' ? 4 : 5;
+          command = [
+            ...x11Args,
+            '/usr/bin/xdotool',
+            'mousemove',
+            '--sync',
+            String(x),
+            String(y),
+            'click',
+            '--repeat',
+            String(scrollAmount),
+            String(button),
+          ];
+          resultOutput = `Scrolled ${direction} at (${x}, ${y})`;
+        }
+      } else if (action === 'type') {
+        const text = args.text;
+        if (
+          typeof text !== 'string' ||
+          text.length === 0 ||
+          text.length > COMPUTER_MAX_TEXT_LENGTH
+        ) {
+          return {
+            ok: false,
+            output: `text must contain 1 through ${COMPUTER_MAX_TEXT_LENGTH} characters`,
+          };
+        }
+        command = [
+          ...containerX11ExecArgs(containerName, display),
+          '/usr/bin/xdotool',
+          'type',
+          '--delay',
+          '0',
+          '--',
+          text,
+        ];
+        resultOutput = `Typed ${text.length} characters`;
+      } else {
+        const key = args.key;
+        if (typeof key !== 'string' || !isValidComputerKey(key)) {
+          return {
+            ok: false,
+            output:
+              'key must use xdotool syntax with alphanumeric, underscore, or hyphen key names joined by plus signs',
+          };
+        }
+        command = [
+          ...containerX11ExecArgs(containerName, display),
+          '/usr/bin/xdotool',
+          'key',
+          '--clearmodifiers',
+          '--',
+          key,
+        ];
+        resultOutput = `Pressed ${key}`;
+      }
+
+      const result = await runContainerCommand(command);
+      if (result.error !== null) {
+        return {
+          ok: false,
+          output: formatContainerError(
+            result.stderr,
+            'Docker computer action failed',
+          ),
+        };
+      }
+      if (!flags.screenshot && !flags.observe) {
+        return { ok: true, output: resultOutput };
+      }
+
+      const observation = await captureContainerScreenshot(
         containerName,
-        'scrot',
-        '/tmp/shot.png',
-      ]);
-      const captureOutput = combineCommandOutput(
-        capture.stdout,
-        capture.stderr,
+        display,
+        outputPath,
       );
-      if (capture.error !== null) {
+      if (!observation.ok) {
         return {
           ok: false,
-          output: captureOutput || capture.error.message,
+          output: `${resultOutput}; observation failed, ${observation.output}`,
         };
       }
-
-      const copied = await runContainerBinaryCommand([
-        'exec',
-        containerName,
-        'cat',
-        '/tmp/shot.png',
-      ]);
-      if (copied.error !== null) {
+      if (observation.images === undefined) {
         return {
           ok: false,
-          output: copied.stderr || copied.error.message,
+          output: `${resultOutput}; observation returned no image`,
         };
       }
-
       return {
         ok: true,
-        output: outputPath,
-        images: [
-          {
-            data: copied.stdout.toString('base64'),
-            mimeType: 'image/png',
-          },
-        ],
+        output: resultOutput,
+        images: observation.images,
       };
     },
   };

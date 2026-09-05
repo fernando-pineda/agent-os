@@ -14,6 +14,14 @@ import {
   type McpServerConfig,
 } from '@agent-os/core';
 import { createGroup, deleteGroup, loadGroups } from './groups.js';
+import {
+  handleHostDesktopRequest,
+  handleHostDesktopUpgrade,
+  isAllowedHostDesktopRequest,
+  isHostDesktopAgentPath,
+  isHostDesktopPath,
+  setHostDesktopCorsHeaders,
+} from './host-desktop.js';
 import { installLaunchdAgent, uninstallLaunchdAgent } from './launchd.js';
 import {
   createMcpServer,
@@ -72,7 +80,18 @@ export function startServer(
       );
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     };
-    sendCors();
+    if (isHostDesktopPath(url.pathname)) {
+      if (!isAllowedHostDesktopRequest(req)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ error: 'Host desktop access is not allowed' }),
+        );
+        return;
+      }
+      setHostDesktopCorsHeaders(res);
+    } else {
+      sendCors();
+    }
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -93,6 +112,21 @@ export function startServer(
   });
 
   server.on('upgrade', (req, socket, head) => {
+    const reqUrl = new URL(
+      req.url ?? '/',
+      `http://${req.headers.host ?? 'localhost'}`,
+    );
+    if (isHostDesktopAgentPath(reqUrl.pathname)) {
+      void handleHostDesktopUpgrade(
+        req,
+        socket as import('node:net').Socket,
+        head,
+      ).catch((err: Error): void => {
+        console.error('Host desktop upgrade error', err.message);
+        socket.destroy();
+      });
+      return;
+    }
     void handleDesktopUpgrade(
       req,
       socket as import('node:net').Socket,
@@ -120,6 +154,11 @@ async function handle(
   statusTracker: StatusTracker,
 ): Promise<void> {
   const pathname = url.pathname;
+
+  if (isHostDesktopPath(pathname)) {
+    const handled = await handleHostDesktopRequest(req, res, pathname);
+    if (handled) return;
+  }
 
   if (pathname === '/api/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
