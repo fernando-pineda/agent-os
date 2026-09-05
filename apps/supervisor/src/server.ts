@@ -38,6 +38,7 @@ import {
   deleteAgent,
   getAgentPort,
   listAgentConfigs,
+  loadRegistry,
   readAgentConfig,
   startAgent,
   stopAgent,
@@ -1407,7 +1408,10 @@ async function handleDesktopUpgrade(
   }
   const id = decodeURIComponent(match[1]!);
   const subPath = match[2] ?? '';
-  const entry = registry.agents.find((agent) => agent.id === id);
+  const diskRegistry = await loadRegistry();
+  const entry =
+    diskRegistry.agents.find((agent) => agent.id === id) ??
+    registry.agents.find((agent) => agent.id === id);
   if (!entry || entry.vncPort === undefined || !entry.vncPassword) {
     socket.destroy();
     return;
@@ -1425,12 +1429,20 @@ async function handleDesktopUpgrade(
     targetReady = true;
     let rawReq = `${req.method ?? 'GET'} /${subPath}${reqUrl.search} HTTP/1.1\r\n`;
     for (const [key, val] of Object.entries(req.headers)) {
-      if (key.toLowerCase() === 'host' || key.toLowerCase() === 'authorization')
+      if (
+        key.toLowerCase() === 'host' ||
+        key.toLowerCase() === 'authorization' ||
+        key.toLowerCase() === 'origin'
+      )
         continue;
       if (typeof val === 'string') rawReq += `${key}: ${val}\r\n`;
     }
     rawReq += `host: localhost:${entry.vncPort}\r\n`;
     rawReq += `authorization: ${authHeader}\r\n`;
+    rawReq += `sec-websocket-origin: ${reqUrl.origin}\r\n`;
+    if (!rawReq.toLowerCase().includes('sec-websocket-protocol:')) {
+      rawReq += 'sec-websocket-protocol: binary\r\n';
+    }
     rawReq += '\r\n';
     targetSocket.write(rawReq);
   });
