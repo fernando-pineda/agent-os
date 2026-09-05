@@ -9,6 +9,7 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
+import { request as httpsRequest } from 'node:https';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,9 @@ const DEFAULT_PLUGINS = ['open-computer-use'];
 const DEFAULT_KASM_IMAGE = 'kasmweb/ubuntu-jammy-desktop:1.19.0';
 const DOCKER_COMMAND_TIMEOUT_MS = 30_000;
 const DOCKER_PULL_TIMEOUT_MS = 300_000;
+const KASM_READINESS_TIMEOUT_MS = 30_000;
+const KASM_READINESS_REQUEST_TIMEOUT_MS = 2_000;
+const KASM_READINESS_RETRY_DELAY_MS = 250;
 
 export interface RegistryEntry {
   id: string;
@@ -577,6 +581,64 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function probeKasmReadiness(port: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const request = httpsRequest(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/',
+        method: 'GET',
+        rejectUnauthorized: false,
+      },
+      (response) => {
+        response.on('error', (error) => {
+          request.destroy(error);
+        });
+        if (timeout !== undefined) clearTimeout(timeout);
+        response.resume();
+        resolve();
+      },
+    );
+    request.once('error', (error) => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      reject(error);
+    });
+    timeout = setTimeout(() => {
+      request.destroy(
+        new Error(`KasmVNC readiness request timed out on port ${port}`),
+      );
+    }, timeoutMs);
+    request.end();
+  });
+}
+
+async function waitForKasmReadiness(port: number): Promise<void> {
+  const deadline = Date.now() + KASM_READINESS_TIMEOUT_MS;
+  let lastError: Error | undefined;
+
+  while (Date.now() < deadline) {
+    const timeoutMs = Math.min(
+      KASM_READINESS_REQUEST_TIMEOUT_MS,
+      deadline - Date.now(),
+    );
+    try {
+      await probeKasmReadiness(port, timeoutMs);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(KASM_READINESS_RETRY_DELAY_MS, remainingMs));
+  }
+
+  const detail = lastError ? `: ${lastError.message}` : '';
+  throw new Error(`KasmVNC readiness check timed out on port ${port}${detail}`);
+}
+
 function runCommand(command: string, args: string[]): Promise<boolean> {
   return new Promise((resolve, reject) => {
     execFile(command, args, (error) => {
@@ -864,22 +926,28 @@ async function spawnDockerContainer(
       DOCKER_PULL_TIMEOUT_MS,
     );
   }
-  const stdout = await runDockerCommand(
-    [
-      'run',
-      '-d',
-      '--rm',
-      '--shm-size=512m',
-      '-p',
-      `127.0.0.1:${vncPort}:6901`,
-      '-e',
-      `VNC_PW=${vncPassword}`,
-      '--name',
-      containerName,
-      kasmImage,
-    ],
-    false,
-  );
+  let stdout: string;
+  try {
+    stdout = await runDockerCommand(
+      [
+        'run',
+        '-d',
+        '--rm',
+        '--shm-size=512m',
+        '-p',
+        `127.0.0.1:${vncPort}:6901`,
+        '-e',
+        `VNC_PW=${vncPassword}`,
+        '--name',
+        containerName,
+        kasmImage,
+      ],
+      false,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message.replaceAll(vncPassword, '[redacted]'));
+  }
   const containerId = stdout.trim().split(/\s+/)[0];
   if (!containerId) {
     throw new Error(`docker run returned no container id for ${agentId}`);
@@ -940,9 +1008,24 @@ async function spawnAgentProcess(
         vncPort,
         config.kasmImage ?? DEFAULT_KASM_IMAGE,
       );
+      await waitForKasmReadiness(dockerResult.vncPort);
       entry.containerStatus = 'running';
     } catch (err) {
       entry.containerStatus = 'failed';
+      if (dockerResult) {
+        try {
+          await stopDockerContainer(id);
+        } catch (cleanupError) {
+          console.warn(
+            `stopDockerContainer(${id}) after container startup failure failed: ${
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError)
+            }`,
+          );
+        }
+      }
+      dockerResult = undefined;
       console.error(
         `Docker container spawn failed for ${id}:`,
         err instanceof Error ? err.message : String(err),
