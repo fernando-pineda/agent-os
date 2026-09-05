@@ -170,7 +170,19 @@ export class StatusTrackerImpl implements StatusTracker {
       }
     }
     if (changed) {
-      await saveRegistry(this.registry);
+      const diskRegistry = await loadRegistry();
+      for (const entry of this.registry.agents) {
+        const diskEntry = diskRegistry.agents.find((e) => e.id === entry.id);
+        if (diskEntry) {
+          diskEntry.status = entry.status;
+          diskEntry.lastSeen = entry.lastSeen;
+          diskEntry.currentTaskId = entry.currentTaskId;
+        } else {
+          diskRegistry.agents.push(entry);
+        }
+      }
+      await saveRegistry(diskRegistry);
+      this.registry = diskRegistry;
       this.notify();
     }
   }
