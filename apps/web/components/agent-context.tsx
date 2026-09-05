@@ -14,6 +14,7 @@ import {
   getGroups,
   getModels,
   subscribeAgentEvents,
+  SUPERVISOR_BASE,
 } from '@/lib/api';
 import type { AgentInfo, ModelItem } from '@/lib/types';
 
@@ -79,7 +80,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         ? agent
         : {
             ...agent,
-            desktopUrl: `https://localhost:${agent.desktopPort}`,
+            desktopUrl: `${SUPERVISOR_BASE}/api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/`,
           },
     [],
   );

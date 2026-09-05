@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from 'node:http';
+import { connect as netConnect } from 'node:net';
 import { URL } from 'node:url';
 import {
   AGENT_AVATAR_DEFAULT_COLOR,
@@ -87,6 +88,15 @@ export function startServer(
         );
       }
     }
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    void handleDesktopUpgrade(
+      req,
+      socket as import('node:net').Socket,
+      head,
+      registry,
+    );
   });
 
   server.listen(port, () => {
@@ -631,11 +641,74 @@ async function handle(
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
-        url: `https://localhost:${entry.vncPort}`,
+        url: `http://localhost:${port}/api/agents/${encodeURIComponent(id)}/desktop/proxy/`,
         port: entry.vncPort,
         status: entry.status === 'stopped' ? 'stopped' : 'running',
       }),
     );
+    return;
+  }
+
+  const matchDesktopProxy =
+    /^\/api\/agents\/([^/]+)\/desktop\/proxy\/?(.*)$/.exec(pathname);
+  if (matchDesktopProxy) {
+    const id = decodeURIComponent(matchDesktopProxy[1]!);
+    const subPath = matchDesktopProxy[2] ?? '';
+    const entry = registry.agents.find((agent) => agent.id === id);
+    if (!entry || entry.vncPort === undefined || !entry.vncPassword) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'No desktop for this agent' }));
+      return;
+    }
+    const target = new URL(
+      `https://localhost:${entry.vncPort}/${subPath}${url.search}`,
+    );
+    const authHeader = `Basic ${Buffer.from(`kasm_user:${entry.vncPassword}`).toString('base64')}`;
+    const headers: Record<string, string> = {};
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (
+        key.toLowerCase() === 'host' ||
+        key.toLowerCase() === 'connection' ||
+        key.toLowerCase() === 'authorization'
+      )
+        continue;
+      if (typeof val === 'string') headers[key] = val;
+    }
+    headers['authorization'] = authHeader;
+    headers['host'] = `localhost:${entry.vncPort}`;
+
+    const proxyReq = await fetch(target, {
+      method: req.method ?? 'GET',
+      headers,
+      ...(req.method !== 'GET' && req.method !== 'HEAD' ? { body: req } : {}),
+      redirect: 'manual',
+    });
+
+    const respHeaders: Record<string, string> = {};
+    proxyReq.headers.forEach((val, key) => {
+      if (
+        key.toLowerCase() === 'transfer-encoding' ||
+        key.toLowerCase() === 'connection'
+      )
+        return;
+      respHeaders[key] = val;
+    });
+    res.writeHead(proxyReq.status, respHeaders);
+    if (proxyReq.body) {
+      const reader = proxyReq.body.getReader();
+      const pump = async (): Promise<void> => {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          return;
+        }
+        res.write(value);
+        return pump();
+      };
+      await pump();
+    } else {
+      res.end();
+    }
     return;
   }
 
@@ -1312,4 +1385,57 @@ async function shutdown(
   server.close(() => {
     process.exit(0);
   });
+}
+
+async function handleDesktopUpgrade(
+  req: IncomingMessage,
+  socket: import('node:net').Socket,
+  _head: Buffer,
+  registry: Registry,
+): Promise<void> {
+  const reqUrl = new URL(
+    req.url ?? '/',
+    `http://${req.headers.host ?? 'localhost'}`,
+  );
+  const match = /^\/api\/agents\/([^/]+)\/desktop\/proxy\/?(.*)$/.exec(
+    reqUrl.pathname,
+  );
+  if (!match) {
+    socket.destroy();
+    return;
+  }
+  const id = decodeURIComponent(match[1]!);
+  const subPath = match[2] ?? '';
+  const entry = registry.agents.find((agent) => agent.id === id);
+  if (!entry || entry.vncPort === undefined || !entry.vncPassword) {
+    socket.destroy();
+    return;
+  }
+  const authHeader = `Basic ${Buffer.from(`kasm_user:${entry.vncPassword}`).toString('base64')}`;
+
+  const targetSocket = netConnect(entry.vncPort, 'localhost');
+  let targetReady = false;
+
+  targetSocket.on('connect', () => {
+    targetReady = true;
+    let rawReq = `${req.method ?? 'GET'} /${subPath}${reqUrl.search} HTTP/1.1\r\n`;
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (key.toLowerCase() === 'host' || key.toLowerCase() === 'authorization')
+        continue;
+      if (typeof val === 'string') rawReq += `${key}: ${val}\r\n`;
+    }
+    rawReq += `host: localhost:${entry.vncPort}\r\n`;
+    rawReq += `authorization: ${authHeader}\r\n`;
+    rawReq += '\r\n';
+    targetSocket.write(rawReq);
+  });
+
+  targetSocket.on('data', (data) => socket.write(data));
+  socket.on('data', (data) => {
+    if (targetReady) targetSocket.write(data);
+  });
+  targetSocket.on('error', () => socket.destroy());
+  socket.on('error', () => targetSocket.destroy());
+  targetSocket.on('close', () => socket.destroy());
+  socket.on('close', () => targetSocket.destroy());
 }
