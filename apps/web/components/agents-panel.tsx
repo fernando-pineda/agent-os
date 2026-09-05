@@ -657,7 +657,7 @@ export function AgentsPanel() {
   const [kasmImage, setKasmImage] = useState(
     'kasmweb/ubuntu-jammy-desktop:1.19.0',
   );
-  const [creating, setCreating] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
@@ -666,7 +666,6 @@ export function AgentsPanel() {
   const [subagentsLoading, setSubagentsLoading] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupName, setGroupName] = useState('');
-  const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupError, setGroupError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -747,57 +746,53 @@ export function AgentsPanel() {
     }
   }, [dialogOpen, refreshMcpServers, refreshSubagents]);
 
-  const onCreate = useCallback(async () => {
+  const onCreate = useCallback(() => {
     if (!name.trim()) return;
-    setCreating(true);
-    try {
-      const payload: {
-        name: string;
-        role?: string;
-        model?: string;
-        sandboxType?: 'host' | 'docker-desktop';
-        kasmImage?: string;
-        instructions?: string;
-        reminders?: string[];
-        avatar: AgentAvatar;
-        plugins: string[];
-        subagents: string[];
-      } = {
-        name: name.trim(),
-        avatar: { character, color },
-        plugins: selectedPlugins,
-        subagents: selectedSubagents,
-      };
-      if (role.trim()) payload.role = role.trim();
-      if (model.trim()) payload.model = model.trim();
-      if (sandboxType === 'docker-desktop') {
-        payload.sandboxType = 'docker-desktop';
-        payload.kasmImage = kasmImage;
-      }
-      if (instructions.trim()) payload.instructions = instructions.trim();
-      if (reminders.length > 0) payload.reminders = reminders;
-      const agent = await createAgent(payload);
-      setSelectedAgentId(agent.id);
-      setDialogOpen(false);
-      setName('');
-      setRole('');
-      setModel('');
-      setInstructions('');
-      setReminders([]);
-      setCharacter(AGENT_CHARACTERS[0]);
-      setColor(AGENT_AVATAR_DEFAULT_COLOR);
-      setSandboxType('host');
-      setKasmImage('kasmweb/ubuntu-jammy-desktop:1.19.0');
-      setSelectedPlugins([]);
-      setSelectedSubagents([]);
-    } catch (err) {
+    const payload: {
+      name: string;
+      role?: string;
+      model?: string;
+      sandboxType?: 'host' | 'docker-desktop';
+      kasmImage?: string;
+      instructions?: string;
+      reminders?: string[];
+      avatar: AgentAvatar;
+      plugins: string[];
+      subagents: string[];
+    } = {
+      name: name.trim(),
+      avatar: { character, color },
+      plugins: selectedPlugins,
+      subagents: selectedSubagents,
+    };
+    if (role.trim()) payload.role = role.trim();
+    if (model.trim()) payload.model = model.trim();
+    if (sandboxType === 'docker-desktop') {
+      payload.sandboxType = 'docker-desktop';
+      payload.kasmImage = kasmImage;
+    }
+    if (instructions.trim()) payload.instructions = instructions.trim();
+    if (reminders.length > 0) payload.reminders = reminders;
+
+    setDialogOpen(false);
+    setName('');
+    setRole('');
+    setModel('');
+    setInstructions('');
+    setReminders([]);
+    setCharacter(AGENT_CHARACTERS[0]);
+    setColor(AGENT_AVATAR_DEFAULT_COLOR);
+    setSandboxType('host');
+    setKasmImage('kasmweb/ubuntu-jammy-desktop:1.19.0');
+    setSelectedPlugins([]);
+    setSelectedSubagents([]);
+
+    void createAgent(payload).catch((err) => {
       console.error(err);
       window.alert(
         `Failed to create agent: ${err instanceof Error ? err.message : String(err)}`,
       );
-    } finally {
-      setCreating(false);
-    }
+    });
   }, [
     name,
     role,
@@ -808,7 +803,6 @@ export function AgentsPanel() {
     selectedPlugins,
     selectedSubagents,
     reminders,
-    setSelectedAgentId,
   ]);
 
   const onCreateGroup = useCallback(async () => {
@@ -1095,10 +1089,10 @@ export function AgentsPanel() {
               footer={
                 <Button
                   onClick={onCreate}
-                  disabled={!name.trim() || creating}
+                  disabled={!name.trim()}
                   className="w-full"
                 >
-                  {creating ? 'Saving...' : 'Create agent'}
+                  Create agent
                 </Button>
               }
             />

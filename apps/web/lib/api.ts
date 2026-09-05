@@ -98,18 +98,11 @@ export async function getAgents(): Promise<AgentInfo[]> {
 export async function createAgent(
   payload: CreateAgentPayload,
 ): Promise<AgentInfo> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
-  try {
-    return await fetchJson<AgentInfo>(`${BASE}/api/agents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  return fetchJson<AgentInfo>(`${BASE}/api/agents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function startAgent(id: string): Promise<void> {
