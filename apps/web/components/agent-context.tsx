@@ -13,8 +13,8 @@ import {
   getAgents,
   getGroups,
   getModels,
-  subscribeAgentEvents,
   SUPERVISOR_BASE,
+  subscribeAgentEvents,
 } from '@/lib/api';
 import type { AgentInfo, ModelItem } from '@/lib/types';
 
@@ -74,16 +74,17 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   }, []);
   const set = useCallback((id: string | null) => setSelectedAgentId(id), []);
 
-  const addDesktopUrl = useCallback(
-    (agent: AgentInfo): AgentContextAgent =>
-      agent.desktopPort === undefined
-        ? agent
-        : {
-            ...agent,
-            desktopUrl: `${SUPERVISOR_BASE}/api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/`,
-          },
-    [],
-  );
+  const addDesktopUrl = useCallback((agent: AgentInfo): AgentContextAgent => {
+    if (agent.desktopPort === undefined) return agent;
+    const desktopUrl = new URL(
+      `${SUPERVISOR_BASE}/api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/`,
+    );
+    desktopUrl.searchParams.set(
+      'path',
+      `api/agents/${encodeURIComponent(agent.id)}/desktop/proxy/websockify`,
+    );
+    return { ...agent, desktopUrl: desktopUrl.toString() };
+  }, []);
 
   const setAgentSnapshot = useCallback(
     (snapshot: AgentInfo[]): void => {

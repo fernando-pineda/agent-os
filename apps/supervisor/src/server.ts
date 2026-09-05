@@ -98,7 +98,10 @@ export function startServer(
       socket as import('node:net').Socket,
       head,
       registry,
-    );
+    ).catch((err: Error): void => {
+      console.error('Desktop upgrade error', err);
+      socket.destroy();
+    });
   });
 
   server.listen(port, () => {
@@ -663,7 +666,7 @@ async function handle(
       return;
     }
     const target = new URL(
-      `https://localhost:${entry.vncPort}/${subPath}${url.search}`,
+      `https://127.0.0.1:${entry.vncPort}/${subPath}${url.search}`,
     );
     const authHeader = `Basic ${Buffer.from(`kasm_user:${entry.vncPassword}`).toString('base64')}`;
     const headers: Record<string, string> = {};
@@ -1420,7 +1423,7 @@ async function handleDesktopUpgrade(
 
   const targetSocket = tlsConnect({
     port: entry.vncPort,
-    host: 'localhost',
+    host: '127.0.0.1',
     rejectUnauthorized: false,
   });
   let targetReady = false;
